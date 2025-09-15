@@ -8,11 +8,29 @@
 import SwiftUI
 
 struct SheetView: View {
+    @Binding var isPresented: Bool
+    @State var modelName: String = "toy_biplane_realistic"
+    
+    
     var body: some View {
-        Text(/*@START_MENU_TOKEN@*/"Hello, World!"/*@END_MENU_TOKEN@*/)
+        ZStack{
+            ARViewContainer(modelName: $modelName)
+                .ignoresSafeArea(edges: .all)
+            
+            Button(){
+                isPresented.toggle()
+            } label: {
+                Image(systemName: "xmark.circle")
+                    .font(.largeTitle)
+                    .foregroundColor(.black)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Circle())
+            }
+            .padding(24)
+        }
     }
 }
 
 #Preview {
-    SheetView()
+    SheetView(isPresented: .constant(true))
 }
