@@ -8,11 +8,27 @@
 import SwiftUI
 
 struct ProfileView: View {
+    @EnvironmentObject var session: SessionManager
+
     var body: some View {
-        Text(/*@START_MENU_TOKEN@*/"Hello, World!"/*@END_MENU_TOKEN@*/)
+        VStack(spacing: 20) {
+            if let user = session.user {
+                Text("Welcome, \(user.email ?? "User")!")
+                    .font(.title)
+            }
+
+            Button("Sign Out") {
+                session.signOut()
+            }
+            .padding()
+            .frame(maxWidth: .infinity)
+            .background(Color.red)
+            .foregroundColor(.white)
+            .cornerRadius(8)
+        }
+        .padding()
     }
 }
-
 #Preview {
     ProfileView()
 }
