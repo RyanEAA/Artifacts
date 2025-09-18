@@ -1,4 +1,5 @@
 # Firebase config
+Artifacts/GoogleService-Info.plist
 GoogleService-Info.plist
 serviceAccountKey.json
 
