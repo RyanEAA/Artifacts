@@ -20,9 +20,22 @@
 		9462883B2E70B3BE00440442 /* Artifacts.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Artifacts.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		3B4BE3462E7FB35200F37DC2 /* Exceptions for "Artifacts" folder in "Artifacts" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 9462883A2E70B3BE00440442 /* Artifacts */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		9462883D2E70B3BE00440442 /* Artifacts */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				3B4BE3462E7FB35200F37DC2 /* Exceptions for "Artifacts" folder in "Artifacts" target */,
+			);
 			path = Artifacts;
 			sourceTree = "<group>";
 		};
@@ -283,6 +296,7 @@
 				DEVELOPMENT_TEAM = QZQ4U5K473;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Artifacts/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "This app uses the camera to display Augmented Reality objects";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -312,6 +326,7 @@
 				DEVELOPMENT_TEAM = QZQ4U5K473;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Artifacts/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "This app uses the camera to display Augmented Reality objects";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
