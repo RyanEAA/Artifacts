@@ -27,38 +27,41 @@ struct LandingView: View {
     @Binding var showingForm: Bool
     @Binding var isLogin: Bool
     
+    @State private var showTitle = false
+    @State private var showSubtitle = false
+    @State private var showButtons = false
+    
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 48) {
             Spacer()
+            SymbolCycler()
             
             VStack {
-                Image("drawnPlane")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity)
-                                
                 Text("ARTIFACTS")
-                    .font(.custom("FingerPaint-Regular", size: 60))
-                    .foregroundColor(Color("LighterGray"))
+                    .font(.system(size: 58, weight: .bold))
+                    .foregroundColor(Color("MintGreen"))
                     .frame(maxWidth: .infinity)
-                    .padding(.top, -36)
+                    .padding(.vertical)
+                    .opacity(showTitle ? 1 : 0)
+                    .animation(.easeOut(duration: 1).delay(0.2), value: showTitle)
                 
                 VStack {
                     Text("Your Reality, Reimagined")
-                        .font(.custom("Poppins-Bold", size: 26))
+                        .font(.system(size: 28))
                         .foregroundColor(Color("LighterGray"))
                         .frame(maxWidth: .infinity)
+                        .opacity(showSubtitle ? 1 : 0)
+                        .animation(.easeOut(duration: 1).delay(0.6), value: showSubtitle)
                     
                     Text("Transform your surroundings with augmented reality.")
-                        .font(.custom("Poppins-Light", size: 22))
+                        .font(.system(size: 22, weight: .thin))
                         .foregroundColor(Color("LighterGray"))
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
+                        .opacity(showSubtitle ? 1 : 0)
+                        .animation(.easeOut(duration: 1).delay(0.8), value: showSubtitle)
                 }
             }
-            .padding(.horizontal, 24)
-            
-            Spacer()
             
             HStack(spacing: 16) {
                 Button {
@@ -68,11 +71,11 @@ struct LandingView: View {
                     Text("LOGIN")
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .foregroundColor(Color("DarkBlue"))
+                        .foregroundColor(Color("MintGreen"))
                         .background(Color.clear)
                         .overlay(
                             RoundedRectangle(cornerRadius: 4)
-                                .stroke(Color("DarkBlue"), lineWidth: 2)
+                                .stroke(Color("MintGreen"), lineWidth: 2)
                         )
                 }
                 .contentShape(Rectangle())
@@ -84,17 +87,24 @@ struct LandingView: View {
                     Text("SIGN UP")
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(Color("DarkBlue"))
-                        .foregroundColor(Color("LighterGray"))
+                        .background(Color("MintGreen"))
+                        .foregroundColor(Color("DarkGray"))
                         .cornerRadius(4)
                 }
                 .contentShape(Rectangle())
             }
-            .padding(.horizontal, 36)
-            .padding(.bottom, 48)
-            Spacer();
+            .opacity(showButtons ? 1 : 0)
+            .animation(.easeOut(duration: 1).delay(1.2), value: showButtons)
+            
+            Spacer()
         }
-        .background(Color("BrightRed").ignoresSafeArea())
+        .padding(.horizontal, 36)
+        .background(Color("DarkGray").ignoresSafeArea())
+        .onAppear {
+            showTitle = true
+            showSubtitle = true
+            showButtons = true
+        }
     }
 }
 
@@ -104,46 +114,76 @@ struct AuthFormView: View {
     
     @State private var email = ""
     @State private var password = ""
+    @State private var showPassword = false
     
     var body: some View {
         VStack(spacing: 20) {
-            Spacer().frame(height: 60)
+            Spacer()
             
-            Text(isLogin ? "Welcome Back!" : "Create Your Account!")
+            Text(isLogin ? "Welcome Back" : "Create Account")
                 .font(.custom("Poppins-Bold", size: 26))
-                .foregroundColor(Color("LighterGray"))
+                .foregroundColor(Color("MintGreen"))
             
-            Text(isLogin ? "Step into your world of creation." :
-                 "Join us and start creating your world.")
-                .font(.custom("Poppins-Light", size: 18))
+            Text(isLogin ? "Step back into a world of creativity." :
+                 "Bring your imagination into the real world.")
+                .font(.custom("Poppins-Regular", size: 16))
                 .foregroundColor(Color("LighterGray"))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
             
             VStack(spacing: 16) {
                 HStack {
                     Image(systemName: "envelope")
-                    TextField("EMAIL", text: $email)
+                        .foregroundColor(Color("MintGreen"))
+                    TextField("", text: $email, prompt: Text("Email").foregroundColor(Color("LighterGray")))
                         .keyboardType(.emailAddress)
                         .autocapitalization(.none)
+                        .foregroundColor(Color("LighterGray"))
                 }
                 .padding()
-                .background(Color("LighterGray"))
-                .cornerRadius(4)
+                .background(Color("DarkGray"))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color("MintGreen"), lineWidth: 2)
+                )
+                .cornerRadius(8)
                 
                 HStack {
                     Image(systemName: "lock")
-                    SecureField("PASSWORD", text: $password)
+                        .foregroundColor(Color("MintGreen"))
+                    
+                    ZStack {
+                        if showPassword {
+                            TextField("", text: $password, prompt: Text("Password").foregroundColor(Color("LighterGray")))
+                                .foregroundColor(Color("LighterGray"))
+                        } else {
+                            SecureField("", text: $password, prompt: Text("Password").foregroundColor(Color("LighterGray")))
+                                .foregroundColor(Color("LighterGray"))
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    
+                    Button(action: {
+                        showPassword.toggle()
+                    }) {
+                        Image(systemName: showPassword ? "eye.slash" : "eye")
+                            .foregroundColor(Color("MintGreen"))
+                    }
                 }
                 .padding()
-                .background(Color("LighterGray"))
-                .cornerRadius(4)
+                .background(Color("DarkGray"))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color("MintGreen"), lineWidth: 2)
+                )
+                .cornerRadius(8)
             }
-            .padding(.horizontal)
-            .foregroundColor(Color("DarkBlue"))
+            .padding(.horizontal, 24)
             
             if let error = session.errorMessage {
                 Text(error)
-                    .foregroundColor(Color("LighterGray"))
-                    .multilineTextAlignment(.center)
+                    .foregroundColor(.red)
+                    .font(.custom("Poppins-Regular", size: 14))
                     .padding(.horizontal)
             }
             
@@ -154,32 +194,53 @@ struct AuthFormView: View {
                     session.signUp(email: email, password: password)
                 }
             }) {
-                Text(isLogin ? "LOG IN" : "SIGN UP")
+                Text(isLogin ? "LOGIN" : "SIGN UP")
                     .font(.custom("Poppins-SemiBold", size: 18))
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .foregroundColor(Color("LighterGray"))
-                    .background(Color("DarkBlue"))
-                    .cornerRadius(4)
+                    .background(Color("MintGreen"))
+                    .foregroundColor(Color("DarkGray"))
+                    .cornerRadius(8)
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 24)
             
             if isLogin {
-                Button(action: {
+                Button("Forgot Password?") {
                     // ADD RESET FUNCTIONALITY
-                }) {
-                    Text("Forgot Password?")
-                        .font(.custom("Poppins-Regular", size: 14))
-                        .padding(.horizontal, 8)
-                        .contentShape(Rectangle())
                 }
-                .foregroundColor(Color("LighterGray"))
-                .padding(.top, 4)
+                .font(.custom("Poppins-Regular", size: 14))
+                .foregroundColor(Color("MintGreen"))
             }
+            
+            HStack {
+                Rectangle().frame(height: 1).foregroundColor(.gray.opacity(0.3))
+                Text("OR")
+                    .font(.custom("Poppins-Regular", size: 14))
+                    .foregroundColor(Color("LighterGray"))
+                Rectangle().frame(height: 1).foregroundColor(.gray.opacity(0.3))
+            }
+            .padding(.horizontal, 24)
+            
+            Button(action: {}) {
+                HStack {
+                    Image(systemName: "globe")
+                    Text("Sign in with Google")
+                        .font(.custom("Poppins-SemiBold", size: 16))
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color("DarkGray"))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color("MintGreen"), lineWidth: 2)
+                )
+                .foregroundColor(Color("MintGreen"))
+                .cornerRadius(8)
+            }
+            .padding(.horizontal, 24)
             
             Spacer()
             
-            // Toggle Login/Signup
             HStack {
                 Text(isLogin ? "Don’t have an account?" : "Already have an account?")
                     .font(.custom("Poppins-Regular", size: 14))
@@ -191,16 +252,15 @@ struct AuthFormView: View {
                 }) {
                     Text(isLogin ? "Sign Up" : "Log In")
                         .font(.custom("Poppins-Bold", size: 14))
-                        .padding(.horizontal, 8)
-                        .contentShape(Rectangle())
+                        .foregroundColor(Color("MintGreen"))
                 }
-                .foregroundColor(Color("LighterGray"))
             }
             .padding(.bottom, 20)
         }
-        .background(Color("BrightRed").ignoresSafeArea())
+        .background(Color("DarkGray").ignoresSafeArea())
     }
 }
+
 #Preview {
     AuthView()
 }
