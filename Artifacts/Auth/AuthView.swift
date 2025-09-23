@@ -38,8 +38,7 @@ struct LandingView: View {
             
             VStack {
                 AnimatedRevealHeader(
-<<<<<<< HEAD
-                    hiddenMessage: "Redefining Social Media",
+                    hiddenImages: ["Redefining Social Media"],
                     wallRows: 5,
                     wallCols: 9,
                     showBricks: $showBricks
@@ -47,19 +46,9 @@ struct LandingView: View {
                 .frame(height: 180)
 //                .padding(.vertical, 96)
                 
-                Text("ARTIFACTS")
-                    .font(.custom("Poppins-Bold", size: 40))
-=======
-                    hiddenImages: ["smiley", "flower", "car"],
-                    wallRows: 5,
-                    wallCols: 7,
-                    showBricks: $showBricks
-                )
-                .frame(height: 180)
                 
                 Text("ARTIFACTS")
                     .font(.custom("Poppins-Bold", size: 45))
->>>>>>> main
                     .foregroundColor(Color("DarkGray"))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical)
@@ -119,11 +108,8 @@ struct LandingView: View {
             
             Spacer()
         }
-<<<<<<< HEAD
-        .padding(.horizontal, 36)
-=======
+
         .padding(.horizontal, 48)
->>>>>>> main
         .background(Color("MintGreen").ignoresSafeArea())
         .onAppear {
             withAnimation(.easeOut(duration: 1).delay(0.1)) {
@@ -154,11 +140,8 @@ struct AuthFormView: View {
         VStack(spacing: 20) {
             Spacer()
             
-<<<<<<< HEAD
-            Text(isLogin ? "Welcome Back" : "Create Account")
-=======
+
             Text(isLogin ? "Welcome Back!" : "Create Account")
->>>>>>> main
                 .font(.custom("Poppins-Bold", size: 26))
                 .foregroundColor(Color("DarkGray"))
             
