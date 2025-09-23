@@ -20,20 +20,9 @@ struct ProfileView: View {
                     .font(.title)
             }
             
-//            Enter AR Mode
-            Image("toyplane_img")
-                .resizable()
-                .scaledToFit()
-                .foregroundStyle(.tint)
-                .clipShape(RoundedRectangle(cornerSize: CGSize(width: 20, height: 20)))
-                .padding(24)
             
-            Button {
-                isPresented.toggle()
-            } label: {
-                Label("View in AR", systemImage: "arkit")
-            }.buttonStyle(BorderedProminentButtonStyle())
-                .padding(24)
+            // add map or sum
+
             
             
             // sign out button
@@ -47,9 +36,6 @@ struct ProfileView: View {
             .cornerRadius(8)
         }
         .padding()
-        .fullScreenCover(isPresented: $isPresented, content: {
-           SheetView(isPresented: $isPresented)
-        })
     }
 }
 #Preview {
