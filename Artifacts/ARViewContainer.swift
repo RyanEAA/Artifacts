@@ -29,22 +29,13 @@ struct ARViewContainer: UIViewRepresentable {
         arView.session.run(config)
 
         context.coordinator.arView = arView
-        context.coordinator.createReticle()
 
         return arView
     }
 
     func updateUIView(_ uiView: ARView, context: Context) {
-        // Update reticle on pointer move
-        if let p = touchLocation {
-            context.coordinator.updateReticle(for: p)
-        }
-
-        // Place model when requested
-        if placeRequested {
-            context.coordinator.placeModel(named: modelName)
-
-            // Reset the flag on the next runloop tick to avoid infinite loop
+        if let p = touchLocation, placeRequested {
+            context.coordinator.placeModelDirect(at: p, named: modelName)
             DispatchQueue.main.async {
                 self.placeRequested = false
             }
@@ -55,18 +46,44 @@ struct ARViewContainer: UIViewRepresentable {
         var arView: ARView?
         var reticle: ModelEntity?
 
-        func createReticle() {
-            let mesh = MeshResource.generateBox(size: 0.01, cornerRadius: 0.001)
-            let mat  = SimpleMaterial(color: .green, isMetallic: false)
-            let r = ModelEntity(mesh: mesh, materials: [mat])
-            r.isEnabled = false
-            self.reticle = r
-
-            if let arView = arView, let reticle = reticle {
-                let anchor = AnchorEntity(world: .zero)
-                anchor.addChild(reticle)
-                arView.scene.addAnchor(anchor)
+        
+        func placeModelDirect(at location: CGPoint, named modelName: String){
+            guard let arView = arView else {return}
+            
+            // raycast from screen point to AR world
+            let results = arView.raycast(from: location,
+                                       allowing: .estimatedPlane,
+                                       alignment: .horizontal)
+            
+            guard let hit = results.first else {
+                // no plane under the touch
+                // can update later for haptic feedback
+                print("No surface found at touch location")
+                return
             }
+            
+            // Load the model
+            guard let model = try? ModelEntity.loadModel(named: modelName) else {
+                print("Failed to load model named: \(modelName)")
+                return
+            }
+            
+            // enables gesture on the placed model
+            model.generateCollisionShapes(recursive: true)
+            arView.installGestures([.translation, .rotation,.scale], for: model)
+            
+            // anchor model to exact pose returned by ARKit
+            if let anchor = try? AnchorEntity(raycastResult: hit){
+                anchor.addChild(model)
+                arView.scene.addAnchor(anchor)
+                return
+            }
+            // Fallback: position-only (uses worldTransform’s translation)
+            let t = hit.worldTransform.columns.3
+            let anchor = AnchorEntity(world: SIMD3<Float>(t.x, t.y, t.z))
+            anchor.addChild(model)
+            arView.scene.addAnchor(anchor)
+            
         }
 
         func updateReticle(for location: CGPoint) {
@@ -84,6 +101,7 @@ struct ARViewContainer: UIViewRepresentable {
             } else {
                 reticle.isEnabled = false
             }
+
         }
 
         func placeModel(named modelName: String) {

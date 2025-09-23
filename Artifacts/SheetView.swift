@@ -12,7 +12,8 @@ import SwiftUI
 struct SheetView: View {
     @Binding var isPresented: Bool
 
-    @State private var modelName: String = "toy_biplane_realistic"
+//    @State private var modelName: String = "toy_biplane_realistic"
+    @State private var modelName: String = "minecraft_sign"
     @State private var touchLocation: CGPoint? = nil
     @State private var placeRequested: Bool = false
 
@@ -24,12 +25,11 @@ struct SheetView: View {
                             placeRequested: $placeRequested)
                 .gesture(
                     DragGesture(minimumDistance: 0, coordinateSpace: .local)
-                        .onChanged { value in
+                        .onEnded { value in
                             touchLocation = value.location
+                            placeRequested = true
                         }
-                        .onEnded { _ in
-                            // keep last location so reticle stays visible
-                        }
+
                 )
                 .ignoresSafeArea()
 
@@ -47,15 +47,11 @@ struct SheetView: View {
                     }
                     .padding(16)
                 }
+                // end of VSTACK
+                
                 Spacer()
-                Button("Place Object") {
-                    placeRequested = true
-                }
-                .padding()
-                .background(Color.blue)
-                .foregroundColor(.white)
-                .cornerRadius(12)
-                .padding(.bottom, 50)
+                // we can add a button to save build here or sum
+
             }
         }
     }
