@@ -13,6 +13,7 @@ struct ArtifactsApp: App {
         WindowGroup {
 //            ContentView()
             RootTabView()
+
         }
     }
 }

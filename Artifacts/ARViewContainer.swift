@@ -73,11 +73,11 @@ struct ARViewContainer: UIViewRepresentable {
             arView.installGestures([.translation, .rotation,.scale], for: model)
             
             // anchor model to exact pose returned by ARKit
-            if let anchor = try? AnchorEntity(raycastResult: hit){
-                anchor.addChild(model)
-                arView.scene.addAnchor(anchor)
-                return
-            }
+           if let anchor = try? AnchorEntity(raycastResult: hit){
+               anchor.addChild(model)
+               arView.scene.addAnchor(anchor)
+               return
+           }
             // Fallback: position-only (uses worldTransform’s translation)
             let t = hit.worldTransform.columns.3
             let anchor = AnchorEntity(world: SIMD3<Float>(t.x, t.y, t.z))
