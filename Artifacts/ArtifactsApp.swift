@@ -11,7 +11,8 @@ import SwiftUI
 struct ArtifactsApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+//            ContentView()
+            RootTabView()
         }
     }
 }

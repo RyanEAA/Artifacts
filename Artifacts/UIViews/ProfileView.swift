@@ -22,7 +22,7 @@ struct ProfileView: View {
             
             
             // add map or sum
-
+            Spacer()
             
             
             // sign out button

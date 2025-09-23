@@ -18,7 +18,7 @@ struct AppController: App {
     var body: some Scene {
         WindowGroup {
             if session.user != nil {
-                ProfileView()
+                RootTabView()
                     .environmentObject(session)
             } else {
                 AuthView()

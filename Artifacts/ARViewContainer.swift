@@ -86,24 +86,6 @@ struct ARViewContainer: UIViewRepresentable {
             
         }
 
-        func updateReticle(for location: CGPoint) {
-            guard let arView = arView, let reticle = reticle else { return }
-
-            let results = arView.raycast(from: location,
-                                         allowing: .estimatedPlane,
-                                         alignment: .horizontal)
-
-            if let hit = results.first {
-                // extract translation from the 4x4 matrix
-                let t = hit.worldTransform.columns.3
-                reticle.position = SIMD3<Float>(t.x, t.y, t.z)
-                reticle.isEnabled = true
-            } else {
-                reticle.isEnabled = false
-            }
-
-        }
-
         func placeModel(named modelName: String) {
             guard let arView = arView,
                   let reticle = reticle,
