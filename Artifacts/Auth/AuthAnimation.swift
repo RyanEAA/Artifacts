@@ -8,31 +8,27 @@
 import SwiftUI
 
 struct AnimatedRevealHeader: View {
-    let hiddenMessage: String
-
+    var hiddenImages: [String]
     var wallRows: Int = 5
     var wallCols: Int = 8
 
     var headerHeight: CGFloat = 160
     var phoneWidth: CGFloat = 92
     var phoneHeight: CGFloat = 140
-    var phoneTravelDuration: Double = 4.6
+    var phoneTravelDuration: Double = 4
 
     @State private var animatePhone = false
+    @State private var currentImageIndex = 0
     @Binding var showBricks: Bool
-    
+
     var body: some View {
         GeometryReader { fullGeo in
             let totalW = fullGeo.size.width
             let totalH = headerHeight
             let wallW = min(totalW * 0.56, 420)
             let wallH = min(totalH * 0.85, 140)
-
-            let wallOffsetX: CGFloat = 0
-
             let cx = fullGeo.size.width / 2
             let cy = totalH / 2
-
             let startX = cx - wallW/2 - phoneWidth/2 - 10
             let endX   = cx + wallW/2 + phoneWidth/2 + 10
 
@@ -44,41 +40,41 @@ struct AnimatedRevealHeader: View {
                     cols: wallCols,
                     showBricks: $showBricks
                 )
-                .position(x: cx + wallOffsetX, y: cy)
+                .position(x: cx, y: cy)
 
-                Text(hiddenMessage)
-                    .font(.system(size: min(50, wallW * 0.1), weight: .bold))
-                    .multilineTextAlignment(.center)
-                    .frame(width: wallW * 0.88)
-                    .foregroundColor(Color("DarkGray"))
-                    .position(x: cx + wallOffsetX, y: cy + 10)
+                Image(hiddenImages[currentImageIndex])
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: wallW * 0.88, height: wallH * 0.7)
+                    .position(x: cx, y: cy)
                     .compositingGroup()
                     .mask(
                         RoundedRectangle(cornerRadius: 10)
                             .frame(width: phoneWidth * 0.86, height: phoneHeight * 0.76)
                             .position(x: animatePhone ? endX : startX, y: cy)
                     )
-                    .animation(
-                        .easeInOut(duration: phoneTravelDuration)
-                            .repeatForever(autoreverses: true),
-                        value: animatePhone
-                    )
 
                 PhoneView()
                     .frame(width: phoneWidth, height: phoneHeight)
                     .position(x: animatePhone ? endX : startX, y: cy)
-                    .opacity(showBricks ? 1 : 0)
-                    .animation(.easeOut(duration: 1), value: showBricks)
-                    .animation(
-                        .easeInOut(duration: phoneTravelDuration)
-                            .repeatForever(autoreverses: true),
-                        value: animatePhone
-                    )
             }
             .frame(width: fullGeo.size.width, height: totalH)
-            .onAppear { animatePhone = true }
+            .onAppear {
+                animatePhoneLoop()
+            }
         }
         .frame(height: headerHeight)
+    }
+
+    func animatePhoneLoop() {
+        withAnimation(.easeInOut(duration: phoneTravelDuration)) {
+            animatePhone.toggle()
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + phoneTravelDuration) {
+            currentImageIndex = (currentImageIndex + 1) % hiddenImages.count
+            animatePhoneLoop()
+        }
     }
 }
 
