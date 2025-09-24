@@ -38,14 +38,12 @@ struct LandingView: View {
             
             VStack {
                 AnimatedRevealHeader(
-                    hiddenImages: ["Redefining Social Media"],
+                    hiddenImages: ["smiley", "flower", "car"],
                     wallRows: 5,
-                    wallCols: 9,
+                    wallCols: 7,
                     showBricks: $showBricks
                 )
                 .frame(height: 180)
-//                .padding(.vertical, 96)
-                
                 
                 Text("ARTIFACTS")
                     .font(.custom("Poppins-Bold", size: 45))
@@ -108,7 +106,6 @@ struct LandingView: View {
             
             Spacer()
         }
-
         .padding(.horizontal, 48)
         .background(Color("MintGreen").ignoresSafeArea())
         .onAppear {
@@ -137,20 +134,19 @@ struct AuthFormView: View {
     @State private var showPassword = false
     
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             Spacer()
-            
-
-            Text(isLogin ? "Welcome Back!" : "Create Account")
-                .font(.custom("Poppins-Bold", size: 26))
-                .foregroundColor(Color("DarkGray"))
-            
-            Text(isLogin ? "Step back into a world of creativity." :
-                 "Bring your imagination into the real world.")
-                .font(.custom("Poppins-Regular", size: 16))
-                .foregroundColor(Color("DarkGray"))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
+            VStack {
+                Text(isLogin ? "Welcome Back!" : "Create Your Account!")
+                    .font(.custom("Poppins-Bold", size: 26))
+                    .foregroundColor(Color("DarkGray"))
+                
+                Text(isLogin ? "Step back into a world of creativity." :
+                     "Bring your imagination into reality.")
+                    .font(.custom("Poppins-Regular", size: 16))
+                    .foregroundColor(Color("DarkGray"))
+                    .multilineTextAlignment(.center)
+            }
             
             VStack(spacing: 16) {
                 HStack {
@@ -199,7 +195,6 @@ struct AuthFormView: View {
                 )
                 .cornerRadius(8)
             }
-            .padding(.horizontal, 24)
             
             if let error = session.errorMessage {
                 Text(error)
@@ -223,7 +218,6 @@ struct AuthFormView: View {
                     .foregroundColor(Color("MintGreen"))
                     .cornerRadius(8)
             }
-            .padding(.horizontal, 24)
             
             if isLogin {
                 Button("Forgot Password?") {
@@ -240,7 +234,6 @@ struct AuthFormView: View {
                     .foregroundColor(Color("DarkGray"))
                 Rectangle().frame(height: 1).foregroundColor(Color("DarkGray").opacity(0.3))
             }
-            .padding(.horizontal, 24)
             
             Button(action: {}) {
                 HStack {
@@ -258,7 +251,6 @@ struct AuthFormView: View {
                 .foregroundColor(Color("DarkGray"))
                 .cornerRadius(8)
             }
-            .padding(.horizontal, 24)
             
             Spacer()
             
@@ -278,6 +270,7 @@ struct AuthFormView: View {
             }
             .padding(.bottom, 20)
         }
+        .padding(.horizontal, 48)
         .background(Color("MintGreen").ignoresSafeArea())
     }
 }
