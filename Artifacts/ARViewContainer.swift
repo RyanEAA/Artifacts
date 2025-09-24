@@ -52,6 +52,7 @@ struct ARViewContainer: UIViewRepresentable {
             var isEditing: Bool
             // Optional delete button that appears when the text is empty
             var deleteButton: UIButton?
+            var hasBeenTapped: Bool
         }
 
         var annotations: [Annotation] = []
@@ -59,6 +60,24 @@ struct ARViewContainer: UIViewRepresentable {
 
         deinit {
             updateSubscription?.cancel()
+        }
+
+        // Helper to “pop in” a view (used when opening annotations)
+        func animatePopIn(_ view: UIView) {
+            view.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
+            view.alpha = 0
+            UIView.animate(
+                withDuration: 0.25,
+                delay: 0,
+                usingSpringWithDamping: 0.6,
+                initialSpringVelocity: 0.8,
+                options: [.curveEaseOut],
+                animations: {
+                    view.transform = .identity
+                    view.alpha = 1
+                },
+                completion: nil
+            )
         }
 
         @objc
@@ -71,12 +90,19 @@ struct ARViewContainer: UIViewRepresentable {
                 if annotations[index].view.frame.contains(location) {
                     annotations[index].isEditing = true
                     let textView = annotations[index].view
+                    // Clear placeholder text on first tap
+                    if !annotations[index].hasBeenTapped {
+                        annotations[index].hasBeenTapped = true
+                        textView.text = ""
+                    }
                     // Enable user interaction only while editing
                     textView.isUserInteractionEnabled = true
                     textView.isEditable = true
                     textView.layer.borderWidth = 2
                     textView.layer.borderColor = UIColor.systemBlue.cgColor
                     textView.becomeFirstResponder()
+                    // Pop-in animation when opening
+                    animatePopIn(textView)
                     return
                 }
             }
@@ -111,7 +137,7 @@ struct ARViewContainer: UIViewRepresentable {
 
             let textView = UITextView(frame: frame)
             textView.text = "Tap to Edit"
-            textView.backgroundColor = UIColor.systemYellow.withAlphaComponent(0.9)
+            textView.backgroundColor = UIColor.mintGreen.withAlphaComponent(0.9)
             textView.font = UIFont.systemFont(ofSize: 16, weight: .medium)
             textView.textAlignment = .center
             textView.layer.cornerRadius = 8
@@ -123,7 +149,9 @@ struct ARViewContainer: UIViewRepresentable {
             textView.delegate = self
 
             arView.addSubview(textView)
-            annotations.append(Annotation(anchor: anchor, view: textView, isEditing: false, deleteButton: nil))
+            annotations.append(Annotation(anchor: anchor, view: textView, isEditing: false, deleteButton: nil, hasBeenTapped: false))
+            // Pop-in animation for a newly added annotation
+            animatePopIn(textView)
         }
 
         // Show a "Delete?" button when the annotation's text becomes empty
@@ -159,19 +187,30 @@ struct ARViewContainer: UIViewRepresentable {
             }
         }
 
-        // Called when the delete button is tapped. Removes the annotation's view and anchor.
+        // Called when the delete button is tapped. Removes the annotation's view and anchor with a pop-out animation.
         @objc
         func deleteAnnotation(_ sender: UIButton) {
             // Find the annotation associated with this button
             guard let idx = annotations.firstIndex(where: { $0.deleteButton == sender }) else { return }
             let annotation = annotations[idx]
-            // Remove the text view and delete button from the view hierarchy
-            annotation.view.removeFromSuperview()
-            annotation.deleteButton?.removeFromSuperview()
-            // Remove the anchor from the scene
-            arView?.scene.removeAnchor(annotation.anchor)
-            // Remove the annotation from our list
-            annotations.remove(at: idx)
+
+            // Instantly hide the delete button for smoother pop‑out
+            annotation.deleteButton?.isHidden = true
+
+            // Animate the text view shrinking before removal
+            UIView.animate(
+                withDuration: 0.2,
+                animations: {
+                    annotation.view.transform = CGAffineTransform(scaleX: 0.01, y: 0.01)
+                    annotation.view.alpha = 0
+                },
+                completion: { _ in
+                    annotation.view.removeFromSuperview()
+                    annotation.deleteButton?.removeFromSuperview()
+                    self.arView?.scene.removeAnchor(annotation.anchor)
+                    self.annotations.remove(at: idx)
+                }
+            )
         }
 
         // UITextViewDelegate — called whenever the text changes
@@ -223,6 +262,11 @@ struct ARViewContainer: UIViewRepresentable {
                 textView.isUserInteractionEnabled = false
                 textView.resignFirstResponder()
                 hideDeleteButton(for: index)
+                // If no text was entered, restore placeholder and reset first‑tap flag
+                if textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    textView.text = "Tap to Edit"
+                    annotations[index].hasBeenTapped = false
+                }
                 break
             }
         }
