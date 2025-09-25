@@ -109,16 +109,16 @@ struct LandingView: View {
         .padding(.horizontal, 48)
         .background(Color("MintGreen").ignoresSafeArea())
         .onAppear {
-            withAnimation(.easeOut(duration: 1).delay(0.1)) {
+            withAnimation(.easeOut(duration: 1).delay(0.05)) {
                 showBricks = true
             }
-            withAnimation(.easeOut(duration: 1).delay(0.2)) {
+            withAnimation(.easeOut(duration: 1).delay(0.1)) {
                 showTitle = true
             }
-            withAnimation(.easeOut(duration: 1).delay(0.6)) {
+            withAnimation(.easeOut(duration: 1).delay(0.3)) {
                 showSubtitle = true
             }
-            withAnimation(.easeOut(duration: 1).delay(1.2)) {
+            withAnimation(.easeOut(duration: 1).delay(0.6)) {
                 showButtons = true
             }
         }
@@ -272,6 +272,9 @@ struct AuthFormView: View {
         }
         .padding(.horizontal, 48)
         .background(Color("MintGreen").ignoresSafeArea())
+        .onTapGesture {
+            UIApplication.shared.endEditing()
+        }
     }
 }
 
