@@ -16,7 +16,10 @@ struct AppController: App {
 
     var body: some Scene {
         WindowGroup {
-            if session.user != nil {
+            if session.isLoading {
+                StoryboardView()
+                    .ignoresSafeArea()
+            } else if session.user != nil {
                 RootTabView()
                     .environmentObject(session)
             } else {
@@ -30,6 +33,7 @@ struct AppController: App {
 class SessionManager: ObservableObject {
     @Published var user: User?
     @Published var errorMessage: String?
+    @Published var isLoading = true
 
     init() {
         listen()
@@ -38,6 +42,7 @@ class SessionManager: ObservableObject {
     func listen() {
         Auth.auth().addStateDidChangeListener { _, user in
             self.user = user
+            self.isLoading = false
             if user == nil {
                 self.errorMessage = nil
             }
@@ -101,4 +106,14 @@ class SessionManager: ObservableObject {
             return "Authentication failed. Please try again."
         }
     }
+}
+
+struct StoryboardView: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> UIViewController {
+        let storyboard = UIStoryboard(name: "LaunchScreen", bundle: nil)
+        let vc = storyboard.instantiateInitialViewController()!
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
 }
