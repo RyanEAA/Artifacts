@@ -57,6 +57,8 @@ struct AnimatedRevealHeader: View {
                 PhoneView()
                     .frame(width: phoneWidth, height: phoneHeight)
                     .position(x: animatePhone ? endX : startX, y: cy)
+                    .opacity(showBricks ? 1 : 0)
+                    .animation(.easeOut(duration: 1), value: showBricks)
             }
             .frame(width: fullGeo.size.width, height: totalH)
             .onAppear {
