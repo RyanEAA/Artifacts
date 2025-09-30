@@ -12,16 +12,28 @@ struct RootTabView: View {
     enum Tab: Hashable { case profile, home, friends }
     @State private var selected: Tab = .home // def tab is home
     
+    init() {
+        let appearance = UITabBarAppearance()
+        appearance.configureWithDefaultBackground()
+        
+        // Make it more visible but still translucent
+         appearance.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterialDark)
+         appearance.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.25)
+         
+         // Apply to normal and scroll edge states
+         UITabBar.appearance().standardAppearance = appearance
+         UITabBar.appearance().scrollEdgeAppearance = appearance
+    }
+    
     var body: some View {
         TabView(selection: $selected) {
-            
-            
             
             // ProfileView Tab
             NavigationStack{
                 ProfileView()
             }
             .tabItem{
+                //Image(systemName: "person")
                 Label("Profile", systemImage: "person")
             }
             .tag(Tab.profile)
@@ -31,6 +43,7 @@ struct RootTabView: View {
                 HomeARView()
             }
             .tabItem{
+                //Image(systemName: "arkit")
                 Label("Home", systemImage: "arkit")
             }
             .tag(Tab.home)
@@ -40,7 +53,8 @@ struct RootTabView: View {
                 FriendsView()
             }
             .tabItem{
-                Label("Friends", systemImage: "person.two")
+                //Image(systemName: "person.2.fill")
+                Label("Friends", systemImage: "person.2.fill")
             }
             .tag(Tab.friends)
             
