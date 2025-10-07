@@ -129,6 +129,7 @@ struct AuthFormView: View {
     @EnvironmentObject var session: SessionManager
     @Binding var isLogin: Bool
     
+    @State private var username = ""
     @State private var email = ""
     @State private var password = ""
     @State private var showPassword = false
@@ -149,6 +150,20 @@ struct AuthFormView: View {
             }
             
             VStack(spacing: 16) {
+                if !isLogin {
+                    HStack {
+                        Image(systemName: "person")
+                            .foregroundColor(Color("DarkGray"))
+                        TextField("", text: $username, prompt: Text("Username").foregroundColor(Color("DarkGray")))
+                            .autocapitalization(.none)
+                            .foregroundColor(Color("DarkGray"))
+                    }
+                    .padding()
+                    .background(Color("MintGreen"))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color("DarkGray"), lineWidth: 2))
+                    .cornerRadius(8)
+                }
+                
                 HStack {
                     Image(systemName: "envelope")
                         .foregroundColor(Color("DarkGray"))
@@ -207,7 +222,7 @@ struct AuthFormView: View {
                 if isLogin {
                     session.signIn(email: email, password: password)
                 } else {
-                    session.signUp(email: email, password: password)
+                    session.signUp(email: email, password: password, username: username)
                 }
             }) {
                 Text(isLogin ? "LOGIN" : "SIGN UP")
