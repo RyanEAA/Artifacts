@@ -15,7 +15,5 @@
 		<string>Poppins-Thin.ttf</string>
 		<string>FingerPaint-Regular.ttf</string>
 	</array>
-	<key>UILaunchStoryboardName</key>
-	<string>LaunchScreen</string>
 </dict>
 </plist>

@@ -93,11 +93,9 @@ class SessionManager: ObservableObject {
                     let userDoc: [String: Any] = [
                         "username": normalizedUsername,
                         "email": email,
-                        "bio": "",
-                        "friendsCount": 0,
-                        "artifactsCount": 0,
                         "createdAt": Timestamp(),
-                        "lastActive": Timestamp()
+                        "lastActive": Timestamp(),
+                        "profilePictureURL": NSNull()
                     ]
                     
                     self.db.collection("users").document(user.uid).setData(userDoc) { err in
