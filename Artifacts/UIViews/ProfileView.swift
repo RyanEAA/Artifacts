@@ -150,6 +150,12 @@ final class ProfileViewModel: ObservableObject {
         }
     }
 
+    func rejectFriendRequest(username: String) {
+        Task { @MainActor in
+            incomingRequests.removeAll { $0 == username }
+        }
+    }
+    
     func unfriend(username: String) {
         Task { @MainActor in
             friends.removeAll { $0 == username }
@@ -646,6 +652,11 @@ struct ViewAllPostsView: View {
                                                     vm.acceptFriendRequest(username: post.username)
                                                 }
                                             },
+                                            onReject: {
+                                                if categoryIndex == 1 && selectedFriendSubCategory == .requests {
+                                                    vm.rejectFriendRequest(username: post.username)
+                                                }
+                                            },
                                             onUnfriend: {
                                                 if categoryIndex == 1 && selectedFriendSubCategory == .users {
                                                     vm.unfriend(username: post.username)
@@ -674,6 +685,11 @@ struct ViewAllPostsView: View {
                                             onAccept: {
                                                 if categoryIndex == 1 && selectedFriendSubCategory == .requests {
                                                     vm.acceptFriendRequest(username: post.username)
+                                                }
+                                            },
+                                            onReject: {
+                                                if categoryIndex == 1 && selectedFriendSubCategory == .requests {
+                                                    vm.rejectFriendRequest(username: post.username)
                                                 }
                                             },
                                             onUnfriend: {
@@ -727,6 +743,16 @@ struct ViewAllPostsView: View {
                                                     .padding(.vertical, 6)
                                                     .padding(.horizontal, 12)
                                                     .background(Color.white)
+                                                    .clipShape(Capsule())
+                                            }
+                                            
+                                            Button(action: { withAnimation { vm.rejectFriendRequest(username: user.username) } }) {
+                                                Text("Reject")
+                                                    .font(.subheadline.bold())
+                                                    .foregroundColor(.white)
+                                                    .padding(.vertical, 6)
+                                                    .padding(.horizontal, 12)
+                                                    .background(Color.black)
                                                     .clipShape(Capsule())
                                             }
                                         }
@@ -933,6 +959,7 @@ private struct PostRow: View {
     var isUser: Bool = false
     var isRequest: Bool = false
     var onAccept: (() -> Void)? = nil
+    var onReject: (() -> Void)? = nil
     var onUnfriend: (() -> Void)? = nil
 
     var body: some View {
@@ -968,14 +995,26 @@ private struct PostRow: View {
             Spacer()
 
             if isRequest {
-                Button(action: { onAccept?() }) {
-                    Text("Accept")
-                        .font(.subheadline.bold())
-                        .foregroundColor(.black)
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 12)
-                        .background(Color.white)
-                        .clipShape(Capsule())
+                HStack(spacing: 8) {
+                    Button(action: { onAccept?() }) {
+                        Text("Accept")
+                            .font(.subheadline.bold())
+                            .foregroundColor(.black)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 12)
+                            .background(Color.white)
+                            .clipShape(Capsule())
+                    }
+                    
+                    Button(action: { onReject?() }) {
+                        Text("Reject")
+                            .font(.subheadline.bold())
+                            .foregroundColor(.white)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 12)
+                            .background(Color.black)
+                            .clipShape(Capsule())
+                    }
                 }
             } else if isUser {
                 Button(action: { onUnfriend?() }) {
