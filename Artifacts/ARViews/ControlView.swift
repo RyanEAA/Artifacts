@@ -16,42 +16,47 @@ struct BrowseButtons: View {
     @Binding var showBrowse: Bool
     @Binding var showSettings: Bool
     var body: some View{
-        HStack{
+        VStack {
             
-            Spacer()
-            
-            // most recently pressed button
-            MostRecentlyPlacedButton().hidden(self.placementSettings.recentlyPlaced.isEmpty)
-            
-            
-            Spacer()
-            Spacer()
+            HStack{
+                
+                Spacer()
+                
+                // most recently pressed button
+                MostRecentlyPlacedButton().hidden(self.placementSettings.recentlyPlaced.isEmpty)
+                
+                
+                Spacer()
+                Spacer()
 
-            
-            // browse button
-            ControlButton(systemIconName: "square.grid.2x2"){
-                print("Browse Button Pressed...")
-                self.showBrowse.toggle()
-            }.sheet(isPresented: $showBrowse) {
-                // browse view needs to be returned
-                BrowseView(showBrowse: $showBrowse)
-                    .environmentObject(placementSettings)
+                
+                // browse button
+                ControlButton(systemIconName: "square.grid.2x2"){
+                    print("Browse Button Pressed...")
+                    self.showBrowse.toggle()
+                }.sheet(isPresented: $showBrowse) {
+                    // browse view needs to be returned
+                    BrowseView(showBrowse: $showBrowse)
+                        .environmentObject(placementSettings)
+                }
+                
+                Spacer()
+                Spacer()
+
+                
+                // Settings button
+                ControlButton(systemIconName: "slider.horizontal.3"){
+                    print("Settings Button Pressed...")
+                    self.showSettings.toggle()
+                }.sheet(isPresented: $showSettings) {
+                    SettingsView(showSettings: $showSettings)
+                }
+                Spacer()
+                                    
             }
             
-            Spacer()
-            Spacer()
-
-            
-            // Settings button
-            ControlButton(systemIconName: "slider.horizontal.3"){
-                print("Settings Button Pressed...")
-                self.showSettings.toggle()
-            }.sheet(isPresented: $showSettings) {
-                SettingsView(showSettings: $showSettings)
-            }
-            Spacer()
-                                
         }
+ 
         
     }
 }
