@@ -13,6 +13,9 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
         FirebaseApp.configure()
+        if let bucket = FirebaseApp.app()?.options.storageBucket {
+          print("Configured Storage bucket:", bucket)
+        }
         return true
     }
 }

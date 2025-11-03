@@ -13,6 +13,12 @@ import FirebaseAuth
 struct AppController: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var session = SessionManager()
+    
+    @StateObject var placementSettings = PlacementSettings()
+    @StateObject var sessionSettings = SessionSettings()
+    @StateObject var sceneManager = SceneManager()
+    @StateObject var modelsViewModel = ModelsViewModel()
+    @StateObject var modelDeletionManager = ModelDeletionManager()
 
     var body: some Scene {
         WindowGroup {
@@ -20,8 +26,14 @@ struct AppController: App {
                 StoryboardView()
                     .ignoresSafeArea()
             } else if session.user != nil {
-                RootTabView()
+                
+                ContentView()
                     .environmentObject(session)
+                    .environmentObject(placementSettings)
+                    .environmentObject(sessionSettings)
+                    .environmentObject(sceneManager)
+                    .environmentObject(modelsViewModel)
+                    .environmentObject(modelDeletionManager)
             } else {
                 AuthView()
                     .environmentObject(session)
