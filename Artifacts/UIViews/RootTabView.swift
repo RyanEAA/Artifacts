@@ -63,7 +63,7 @@ struct RootTabView: View {
 
             // Profile screen overlay (slides up full frame)
             if showProfile {
-                ProfileView(showProfile: $showProfile, session: session)
+                ProfileView(showProfile: $showProfile)
                     .environmentObject(session)
                     .transition(.move(edge: .bottom))
                     .zIndex(1)

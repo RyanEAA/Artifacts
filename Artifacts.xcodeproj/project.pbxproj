@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		941E65652EB9086B0064AE7A /* FocusEntity in Frameworks */ = {isa = PBXBuildFile; productRef = 941E65642EB9086B0064AE7A /* FocusEntity */; };
 		945A37182E7B606400D90A78 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 945A37172E7B606400D90A78 /* FirebaseAuth */; };
 		945A371A2E7B606400D90A78 /* FirebaseAuthCombine-Community in Frameworks */ = {isa = PBXBuildFile; productRef = 945A37192E7B606400D90A78 /* FirebaseAuthCombine-Community */; };
 		945A371C2E7B606400D90A78 /* FirebaseDatabase in Frameworks */ = {isa = PBXBuildFile; productRef = 945A371B2E7B606400D90A78 /* FirebaseDatabase */; };
@@ -46,6 +47,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				941E65652EB9086B0064AE7A /* FocusEntity in Frameworks */,
 				945A371C2E7B606400D90A78 /* FirebaseDatabase in Frameworks */,
 				945A37242E7B606400D90A78 /* FirebaseStorageCombine-Community in Frameworks */,
 				945A371E2E7B606400D90A78 /* FirebaseFirestore in Frameworks */,
@@ -102,6 +104,7 @@
 				945A371F2E7B606400D90A78 /* FirebaseFirestoreCombine-Community */,
 				945A37212E7B606400D90A78 /* FirebaseStorage */,
 				945A37232E7B606400D90A78 /* FirebaseStorageCombine-Community */,
+				941E65642EB9086B0064AE7A /* FocusEntity */,
 			);
 			productName = Artifacts;
 			productReference = 9462883B2E70B3BE00440442 /* Artifacts.app */;
@@ -133,6 +136,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				945A37162E7B606200D90A78 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				941E65632EB9086B0064AE7A /* XCRemoteSwiftPackageReference "FocusEntity" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9462883C2E70B3BE00440442 /* Products */;
@@ -374,6 +378,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		941E65632EB9086B0064AE7A /* XCRemoteSwiftPackageReference "FocusEntity" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/maxxfrazer/FocusEntity.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.2;
+			};
+		};
 		945A37162E7B606200D90A78 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
@@ -385,6 +397,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		941E65642EB9086B0064AE7A /* FocusEntity */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 941E65632EB9086B0064AE7A /* XCRemoteSwiftPackageReference "FocusEntity" */;
+			productName = FocusEntity;
+		};
 		945A37172E7B606400D90A78 /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 945A37162E7B606200D90A78 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;

@@ -182,9 +182,10 @@ final class ProfileViewModel: ObservableObject {
 }
 
 struct ProfileView: View {
-    @EnvironmentObject var session: SessionManager
     @Binding var showProfile: Bool
     @StateObject private var vm: ProfileViewModel
+    @EnvironmentObject var session: SessionManager
+
 
     @State private var region = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 30.229, longitude: -97.756),
@@ -221,10 +222,10 @@ struct ProfileView: View {
         }
     }
     
-    init(showProfile: Binding<Bool>, session: SessionManager) {
+    init(showProfile: Binding<Bool>) {
         _showProfile = showProfile
         _vm = StateObject(wrappedValue: ProfileViewModel(
-            currentUsername: session.userData?["username"] as? String ?? "anonymous_user"
+            currentUsername: "anonymous_user"
         ))
     }
 
@@ -1040,7 +1041,6 @@ struct ProfileView_Previews: PreviewProvider {
     static var previews: some View {
         ProfileView(
             showProfile: .constant(true),
-            session: SessionManager()
         )
         .environmentObject(SessionManager())
     }
