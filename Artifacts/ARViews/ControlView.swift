@@ -141,7 +141,7 @@ struct ControlView: View {
                 if isControlsVisible {
                     ProfileViewButton(isProfileVisible: $showProfile)
                         .sheet(isPresented: $showProfile) {
-                            ProfileView(showProfile: $showProfile)
+                            QuickProfileView()
                         }
                 }
 

@@ -3,3 +3,4 @@ Artifacts/GoogleService-Info.plist
 GoogleService-Info.plist
 serviceAccountKey.json
 *.plist
+GoogleService-Info.plist
