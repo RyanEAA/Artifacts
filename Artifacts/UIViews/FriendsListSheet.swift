@@ -5,125 +5,306 @@
 //  Created by Ryan Aparicio on 11/4/25.
 //
 
+
 import SwiftUI
+import FirebaseFirestore
 
 struct FriendsListSheet: View {
-    
     @EnvironmentObject var session: SessionManager
-    
+    @EnvironmentObject var friendsService: FriendsService
+
     @Binding var friends: [String]
 
+    @Environment(\.dismiss) private var dismiss
 
-    private var username: String {
-        (session.userData?["username"] as? String) ?? "anonymous_user"
-    }
-
+    // Search
     @State private var search = ""
-    @State private var addText = ""
-//    @State private var friends: [String] = ["sarah_creates", "devon_art", "luna_doodles"]
 
-    private var filtered: [String] {
-        guard !search.isEmpty else { return friends }
-        return friends.filter { $0.localizedCaseInsensitiveContains(search) }
+    // Incoming requests (display model)
+    struct RequestRow: Identifiable, Hashable {
+        let id: String            // friendLinks doc id
+        let requesterUid: String
+        let username: String
+        let avatarURL: URL? = nil  // hook up later if you add profilePictureURL
     }
+    @State private var incoming: [RequestRow] = []
+
+    // Friends/suggestions
+    @State private var friendRows: [FriendUser] = []
+    @State private var suggestions: [FriendUser] = []
+
+    // Listeners
+    @State private var listenerFriends: ListenerRegistration?
+    @State private var listenerIncoming: ListenerRegistration?
+
+    private var myUid: String? { session.user?.uid }
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                Color.black.ignoresSafeArea()
-
-                VStack(spacing: 12) {
-                    // Search
+            List {
+                // One search bar
+                Section {
                     HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.white.opacity(0.6))
-                        TextField("Search friends…", text: $search)
+                        Image(systemName: "magnifyingglass").foregroundColor(.secondary)
+                        TextField("Search friends & users…", text: $search)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled(true)
-                            .foregroundColor(.white)
                     }
-                    .padding(12)
-                    .background(Color.white.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .padding(.horizontal)
-
-                    // Add friend
-                    HStack(spacing: 8) {
-                        TextField("Add friend by username…", text: $addText)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled(true)
-                            .foregroundColor(.white)
-
-                        Button {
-                            let candidate = addText.trimmingCharacters(in: .whitespacesAndNewlines)
-                            guard !candidate.isEmpty,
-                                  candidate != username,
-                                  !friends.contains(where: { $0.caseInsensitiveCompare(candidate) == .orderedSame })
-                            else { return }
-                            friends.append(candidate)
-                            addText = ""
-                        } label: {
-                            Text("Add")
-                                .font(.subheadline.bold())
-                                .foregroundColor(.black)
-                                .padding(.vertical, 8)
-                                .padding(.horizontal, 12)
-                                .background(Color.white)
-                                .clipShape(Capsule())
-                        }
-                    }
-                    .padding(12)
-                    .background(Color.white.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .padding(.horizontal)
-
-                    // List
-                    if filtered.isEmpty {
-                        Text("No friends found")
-                            .foregroundColor(.white.opacity(0.7))
-                            .padding(.top, 20)
-                    } else {
-                        List {
-                            ForEach(filtered, id: \.self) { name in
-                                HStack {
-                                    Image(systemName: "person.circle.fill")
-                                        .foregroundColor(.white)
-                                    Text(name)
-                                        .foregroundColor(.white)
-                                    Spacer()
-                                    Button(role: .destructive) {
-                                        friends.removeAll { $0 == name }
-                                    } label: {
-                                        Image(systemName: "trash")
-                                            .foregroundColor(.red)
-                                    }
-                                }
-                                .listRowBackground(Color.black)
-                            }
-                        }
-                        .scrollContentBackground(.hidden)
-                        .listStyle(.plain)
-                    }
-
-                    Spacer(minLength: 0)
                 }
-                .navigationTitle("Friends")
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") { dismiss() }
-                            .foregroundColor(.white)
+
+                // Friend requests section (Facebook-style)
+                if !incoming.isEmpty {
+                    Section {
+                        headerRow(
+                            title: "Friend requests",
+                            badge: incoming.count,
+                            trailing: Text("See All").font(.subheadline).foregroundColor(.blue)
+                        )
+
+                        ForEach(incoming) { r in
+                            facebookRow(
+                                title: r.username,
+                                subtitle: nil,
+                                avatarURL: r.avatarURL,
+                                primaryTitle: "Confirm",
+                                secondaryTitle: "Delete",
+                                onPrimary: { accept(requesterUid: r.requesterUid) },
+                                onSecondary: { decline(requesterUid: r.requesterUid) }
+                            )
+                        }
                     }
+                }
+
+                // Friends (sorted, filtered)
+                let filteredFriends = filteredFriendsList()
+                Section {
+                    headerRow(
+                        title: "Your friends",
+                        badge: max(friendRows.count, friends.count), // <- badge fallback
+                        trailing: EmptyView()
+                    )
+
+                    // If Firestore hasn't delivered yet, fall back to the usernames passed in
+                    let rowsToShow: [FriendUser] =
+                        !friendRows.isEmpty
+                        ? filteredFriends
+                        : friends
+                            .map { FriendUser(id: $0, username: $0) } // temp display only
+                            .sorted { $0.username.lowercased() < $1.username.lowercased() }
+                            .filter { search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                      || $0.username.lowercased().contains(search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) }
+
+                    if rowsToShow.isEmpty {
+                        Text(search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                             ? "You have no friends yet."
+                             : "No friends match “\(search.trimmingCharacters(in: .whitespacesAndNewlines))”.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 4)
+                    } else {
+                        ForEach(rowsToShow) { u in
+                            facebookRow(
+                                title: u.username,
+                                subtitle: nil,
+                                avatarURL: nil,
+                                primaryTitle: "Message",
+                                secondaryTitle: "Remove",
+                                onPrimary: {},
+                                onSecondary: {}
+                            )
+                        }
+                    }
+                }
+
+
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Friends")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        }
+        .onAppear(perform: startListening)
+        .onDisappear {
+            listenerFriends?.remove()
+            listenerIncoming?.remove()
+        }
+        .onChange(of: search) { _, _ in debounceSearch() }
+    }
+
+    // MARK: - Header + Facebook row components
+
+    @ViewBuilder
+    private func headerRow(title: String, badge: Int, trailing: some View) -> some View {
+        HStack {
+            HStack(spacing: 6) {
+                Text(title).font(.headline.weight(.semibold))
+                Text("\(badge)").font(.headline.weight(.semibold)).foregroundStyle(.red)
+            }
+            Spacer()
+            trailing
+        }
+        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
+    }
+
+    @ViewBuilder
+    private func facebookRow(
+        title: String,
+        subtitle: String?,
+        avatarURL: URL?,
+        primaryTitle: String,
+        secondaryTitle: String,
+        onPrimary: @escaping () -> Void,
+        onSecondary: @escaping () -> Void
+    ) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            // Avatar
+            ZStack {
+                Circle().fill(Color.gray.opacity(0.15))
+                Image(systemName: "person.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 48, height: 48)
+
+            // Name + subtitle
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.body.weight(.semibold))
+                if let subtitle { Text(subtitle).font(.subheadline).foregroundStyle(.secondary) }
+            }
+
+            Spacer()
+
+            // Buttons like Facebook
+            HStack(spacing: 8) {
+                Button(action: onPrimary) {
+                    Text(primaryTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.blue)
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                }
+                Button(action: onSecondary) {
+                    Text(secondaryTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.gray.opacity(0.15))
+                        .foregroundStyle(.primary)
+                        .clipShape(Capsule())
                 }
             }
         }
     }
 
-    @Environment(\.dismiss) private var dismiss
+    // MARK: - Data
+    private func startListening() {
+        // First: one-shot fetch so the list is not empty when opening the sheet
+        Task {
+            do {
+                let uids = try await friendsService.fetchAcceptedFriendUIDsOnce()
+                let users = try await friendsService.fetchUsernames(for: uids)
+                let sorted = users.sorted { $0.username.lowercased() < $1.username.lowercased() }
+                await MainActor.run {
+                    self.friendRows = sorted
+                    self.friends = sorted.map { $0.username }  // keep external binding in sync
+                }
+            } catch {
+                print("🔥 fetchAcceptedFriendUIDsOnce error:", error)
+            }
+        }
+
+        // Then: the live listener to keep it updated
+        do {
+            listenerFriends = try friendsService.listenFriendUIDs { uids in
+                Task {
+                    let users = try? await friendsService.fetchUsernames(for: uids)
+                    let sorted = (users ?? []).sorted { $0.username.lowercased() < $1.username.lowercased() }
+                    await MainActor.run {
+                        self.friendRows = sorted
+                        self.friends = sorted.map { $0.username }
+                    }
+                }
+            }
+        } catch {
+            print("🔥 listenFriendUIDs failed to start:", error)
+        }
+
+        // Incoming requests listener (recipient == me)
+        do {
+            listenerIncoming = try friendsService.listenIncomingRequests { rows in
+                Task {
+                    let requesters = rows.map { $0.requesterUid }
+                    let users = try? await friendsService.fetchUsernames(for: requesters)
+                    let map = Dictionary(uniqueKeysWithValues: (users ?? []).map { ($0.id, $0.username) })
+                    let display = rows.map { RequestRow(id: $0.id, requesterUid: $0.requesterUid, username: map[$0.requesterUid] ?? "user") }
+                        .sorted { $0.username.lowercased() < $1.username.lowercased() }
+                    await MainActor.run { self.incoming = display }
+                }
+            }
+        } catch {
+            print("🔥 listenIncomingRequests failed to start:", error)
+        }
+    }
+
+    private func filteredFriendsList() -> [FriendUser] {
+        let q = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return friendRows }
+        return friendRows.filter { $0.username.lowercased().contains(q) }
+    }
+
+    // Debounced global search (People)
+    @State private var searchTask: Task<Void, Never>?
+    private func debounceSearch() {
+        searchTask?.cancel()
+        let q = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { suggestions = []; return }
+        searchTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            await runSearch(prefix: q)
+        }
+    }
+
+    @MainActor
+    private func runSearch(prefix: String) async {
+        guard let me = myUid else { return }
+        let existing = Set(friendRows.map { $0.id }).union(incoming.map { $0.requesterUid })
+        let results = (try? await friendsService.searchUsernames(prefix: prefix, limit: 25)) ?? []
+        let filtered = results
+            .filter { $0.id != me && !existing.contains($0.id) }
+            .sorted { $0.username.lowercased() < $1.username.lowercased() }
+        self.suggestions = filtered
+    }
+
+    // MARK: - Actions
+
+    private func add(username: String) {
+        Task {
+            do { try await friendsService.sendRequest(toUsername: username) }
+            catch { print("sendRequest error:", error) }
+        }
+    }
+
+    private func accept(requesterUid: String) {
+        Task {
+            do { try await friendsService.acceptRequest(from: requesterUid) }
+            catch { print("accept error:", error) }
+        }
+    }
+
+    private func decline(requesterUid: String) {
+        Task {
+            do { try await friendsService.declineRequest(from: requesterUid) }
+            catch { print("decline error:", error) }
+        }
+    }
 }
 
 #Preview {
-    FriendsListSheet(
-        friends: .constant(["sarah_creates","devon_art","luna_doodles"])
-    )
-    .environmentObject(SessionManager())   // so `username` resolves in preview
+    FriendsListSheet(friends: .constant(["sarah_creates","devon_art","luna_doodles"]))
+        .environmentObject(SessionManager())
+        .environmentObject(FriendsService())
 }

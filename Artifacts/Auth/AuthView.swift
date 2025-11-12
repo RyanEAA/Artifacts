@@ -155,8 +155,12 @@ struct AuthFormView: View {
                         Image(systemName: "person")
                             .foregroundColor(Color("DarkGray"))
                         TextField("", text: $username, prompt: Text("Username").foregroundColor(Color("DarkGray")))
-                            .autocapitalization(.none)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled(true)
                             .foregroundColor(Color("DarkGray"))
+                            .onChange(of: username) { _, newValue in
+                                username = newValue.lowercased()
+                            }
                     }
                     .padding()
                     .background(Color("MintGreen"))
@@ -222,7 +226,11 @@ struct AuthFormView: View {
                 if isLogin {
                     session.signIn(email: email, password: password)
                 } else {
-                    session.signUp(email: email, password: password, username: username)
+                    let cleanUsername = username
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .lowercased()
+
+                    session.signUp(email: email, password: password, username: cleanUsername)
                 }
             }) {
                 Text(isLogin ? "LOGIN" : "SIGN UP")

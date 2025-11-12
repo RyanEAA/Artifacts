@@ -8,15 +8,20 @@
 import SwiftUI
 import MapKit
 import CoreLocation
+import FirebaseAuth
+import FirebaseFirestore   // <- needed for ListenerRegistration
 
 struct QuickProfileView: View {
     @EnvironmentObject var session: SessionManager
     @EnvironmentObject var friendsService: FriendsService
 
-    // Mock data for now
-    @State private var friends: [String] = ["sarah_creates", "devon_art", "luna_doodles"]
+    // Live data
+    @State private var friendCount: Int = 0
+    @State private var friends: [String] = []                 // <- used by FriendsListSheet
+    @State private var friendsListener: ListenerRegistration? // <- consistent name
     @State private var artifactsCount: Int = 10
 
+    // UI state
     @State private var showFriends = false
     @State private var showFullMap = false
 
@@ -31,7 +36,6 @@ struct QuickProfileView: View {
 
     var body: some View {
         ZStack {
-            // subtle background
             LinearGradient(
                 colors: [Color(.systemBackground), Color(.secondarySystemBackground)],
                 startPoint: .top, endPoint: .bottom
@@ -39,6 +43,7 @@ struct QuickProfileView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 18) {
+
                 // Avatar
                 ZStack {
                     Circle()
@@ -65,12 +70,9 @@ struct QuickProfileView: View {
 
                 // Stats row
                 HStack(spacing: 28) {
-                    // friends button
                     Spacer()
-                    Button {
-                        showFriends = true
-                    } label: {
-                        statText(label: "Friends", value: "\(friends.count)")
+                    Button { showFriends = true } label: {
+                        statText(label: "Friends", value: "\(friendCount)")
                     }
                     .buttonStyle(.plain)
                     .contentShape(Rectangle())
@@ -100,10 +102,7 @@ struct QuickProfileView: View {
                             .font(.subheadline.bold())
                             .padding(.vertical, 10)
                             .padding(.horizontal, 16)
-                            .background(
-                                Capsule()
-                                    .fill(Color.accentColor.opacity(0.9))
-                            )
+                            .background(Capsule().fill(Color.accentColor.opacity(0.9)))
                             .foregroundStyle(.white)
                             .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 4)
                     }
@@ -119,22 +118,17 @@ struct QuickProfileView: View {
                 } label: {
                     Text("Logout")
                         .font(.headline.weight(.semibold))
-                        .foregroundStyle(Color(red: 0.86, green: 0.27, blue: 0.23)) // soft red
+                        .foregroundStyle(Color(red: 0.86, green: 0.27, blue: 0.23))
                         .padding(.vertical, 12)
                         .padding(.horizontal, 36)
-                        .background(
-                            Capsule()
-                                .fill(Color(red: 0.86, green: 0.27, blue: 0.23).opacity(0.12))
-                        )
-                        .overlay(
-                            Capsule().stroke(Color(red: 0.86, green: 0.27, blue: 0.23).opacity(0.25), lineWidth: 1)
-                        )
+                        .background(Capsule().fill(Color(red: 0.86, green: 0.27, blue: 0.23).opacity(0.12)))
+                        .overlay(Capsule().stroke(Color(red: 0.86, green: 0.27, blue: 0.23).opacity(0.25), lineWidth: 1))
                 }
                 .buttonStyle(.plain)
                 .padding(.bottom, 18)
             }
         }
-        // Friends sheet (uses mock list for now)
+        // Friends sheet (now fed by live `friends`)
         .sheet(isPresented: $showFriends) {
             FriendsListSheet(friends: $friends)
                 .presentationDetents([.medium, .large])
@@ -145,9 +139,13 @@ struct QuickProfileView: View {
                 region = newRegion
             }
         }
+        // Start/stop the live friend count when this view appears
+        .onAppear { startFriendsListener() }
+        .onDisappear { friendsListener?.remove() }
     }
 
-    // MARK: - UI helpers
+    // MARK: - UI helper
+
     @ViewBuilder
     private func statText(label: String, value: String) -> some View {
         VStack(spacing: 6) {
@@ -156,10 +154,32 @@ struct QuickProfileView: View {
                 .foregroundStyle(.primary)
         }
     }
+
+    // MARK: - Firestore listener
+
+    private func startFriendsListener() {
+        do {
+            friendsListener = try friendsService.listenFriendUIDs { uids in
+                Task {
+                    // update count quickly
+                    await MainActor.run { self.friendCount = uids.count }
+
+                    // resolve usernames for the sheet
+                    let users = try? await friendsService.fetchUsernames(for: uids)
+                    let names = (users ?? [])
+                        .map { $0.username }
+                        .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+                    await MainActor.run { self.friends = names }
+                }
+            }
+        } catch {
+            print("⚠️ listenFriendUIDs failed:", error)
+        }
+    }
 }
-
-
 
 #Preview {
     QuickProfileView()
+        .environmentObject(SessionManager())
+        .environmentObject(FriendsService())
 }
