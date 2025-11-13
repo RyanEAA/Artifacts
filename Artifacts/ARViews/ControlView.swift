@@ -88,8 +88,10 @@ struct SceneButtons: View {
                 switch result {
                 case .success(let meta):
                     if let meta {
-                        self.sceneManager.selectedCloudSceneId = meta.id
-                        self.sceneManager.shouldLoadSceneFromCloud = true  // ARViewContainer will do the actual load
+                        DispatchQueue.main.async {
+                            self.sceneManager.selectedCloudSceneId = meta.id
+                            self.sceneManager.shouldLoadSceneFromCloud = true  // ARViewContainer will do the actual load
+                        }
                     } else {
                         print("No cloud scene found to load.")
                     }
@@ -105,7 +107,11 @@ struct SceneButtons: View {
             CloudSceneStore.fetchMostRecentSceneMeta { result in
                 switch result {
                 case .success(let meta):
-                    if let meta { self.sceneManager.selectedCloudSceneId = meta.id }  // just set id; no load flag here
+                    if let meta {
+                        DispatchQueue.main.async {
+                            self.sceneManager.selectedCloudSceneId = meta.id // just set id; no load flag here
+                        }
+                    }
                 case .failure(let e):
                     print("Failed to fetch latest scene meta on appear:", e)
                 }
@@ -118,10 +124,23 @@ struct SceneButtons: View {
 
         ControlButton(systemIconName: "trash") {
             print("clear scene button pressed")
+            // Remove all 3D anchor entities
             for anchorEntity in sceneManager.anchorEntities {
-                print("Removing anchoEntity with id: \(String(describing: anchorEntity.anchorIdentifier))")
+                print("Removing anchoEntity with id: \(String(describing: anchorEntity.anchorIdentifier)))")
                 anchorEntity.removeFromParent()
             }
+            sceneManager.anchorEntities.removeAll()
+
+            // Remove all 2D annotation views from the screen
+            for (_, tv) in sceneManager.annotationViews {
+                tv.removeFromSuperview()
+            }
+            sceneManager.annotationViews.removeAll()
+            sceneManager.isEditing.removeAll()
+            sceneManager.hasBeenTapped.removeAll()
+
+            // Tell ARViewContainer to also remove the underlying ARAnchors
+            NotificationCenter.default.post(name: .clearAllAnnotations, object: nil)
         }
     }
 }
@@ -308,4 +327,8 @@ struct MostRecentlyPlacedButton: View{
         .cornerRadius(8)
 
     }
+}
+
+extension Notification.Name {
+    static let clearAllAnnotations = Notification.Name("ClearAllAnnotationsNotification")
 }
