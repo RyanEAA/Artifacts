@@ -21,6 +21,10 @@ final class CloudSceneStore {
         storage.reference(withPath: "users/\(uid)/scenes/\(sceneId).worldmap")
     }
 
+    private static func ref(storagePath: String) -> StorageReference {
+        storage.reference(withPath: storagePath)
+    }
+
     static func save(
         data: Data,
         sceneId: String = UUID().uuidString,
@@ -74,10 +78,22 @@ final class CloudSceneStore {
 
 
     static func load(sceneId: String, completion: @escaping (Result<Data, Error>) -> Void) {
-        guard let uid = Auth.auth().currentUser?.uid else { return completion(.failure(CloudSceneError.noUser)) }
-        ref(uid: uid, sceneId: sceneId).getData(maxSize: 20 * 1024 * 1024) { data, err in
-            if let err = err { completion(.failure(CloudSceneError.downloadFailed(err.localizedDescription))) }
-            else if let data = data { completion(.success(data)) }
+        db.collection("scenes").document(sceneId).getDocument { snapshot, err in
+            if let err = err {
+                return completion(.failure(CloudSceneError.downloadFailed(err.localizedDescription)))
+            }
+            guard let data = snapshot?.data(),
+                  let storagePath = data["storagePath"] as? String else {
+                return completion(.failure(CloudSceneError.downloadFailed("Scene metadata missing or invalid.")))
+            }
+
+            ref(storagePath: storagePath).getData(maxSize: 20 * 1024 * 1024) { data, downloadError in
+                if let downloadError = downloadError {
+                    completion(.failure(CloudSceneError.downloadFailed(downloadError.localizedDescription)))
+                } else if let data = data {
+                    completion(.success(data))
+                }
+            }
         }
     }
 }
@@ -145,12 +161,7 @@ extension CloudSceneStore {
 
     /// Fetch all scenes for the current user, sorted by updatedAt desc (bounded by `limit`)
     static func fetchAllSceneMeta(limit: Int = 10, completion: @escaping (Result<[CloudSceneMeta], Error>) -> Void) {
-        guard let uid = Auth.auth().currentUser?.uid else {
-            return completion(.success([]))
-        }
-
         db.collection("scenes")
-            .whereField("ownerUid", isEqualTo: uid)
             .order(by: "updatedAt", descending: true)
             .limit(to: limit)
             .getDocuments { snap, err in
