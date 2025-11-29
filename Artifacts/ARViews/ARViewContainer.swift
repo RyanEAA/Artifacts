@@ -48,6 +48,23 @@ struct ARViewContainer: UIViewRepresentable {
             self.updatePersistenceAvailability(for: arView)
             self.handlePersistence(for: arView)
         })
+
+        // Track which scene should sync artifacts once relocalized
+        let sceneId = self.sceneManager.getOrCreateSceneId()
+        self.sceneManager.pendingSceneIdForArtifacts = sceneId
+        self.sceneManager.hasStartedArtifactSync = false
+        self.sceneManager.hasRelocalizedForArtifacts = false
+        self.sceneManager.artifactIds.removeAll()
+        self.sceneManager.artifactIdToAnchorId.removeAll()
+        self.sceneManager.shouldAttemptSceneAutoMatch = true
+
+        // On cold start, automatically load the last cloud scene if one exists
+        if self.sceneManager.shouldAutoloadLastScene {
+            self.sceneManager.shouldAutoloadLastScene = false
+            self.sceneManager.shouldLoadSceneFromCloud = true
+        }
+        
+        // Artifacts will begin syncing once the session relocalizes to the scene
         
         return arView
     }
@@ -251,24 +268,322 @@ struct ARViewContainer: UIViewRepresentable {
     private func place(_ modelEntity: ModelEntity, for anchor: ARAnchor, in arView: ARView) {
         let clonedEntity = modelEntity.clone(recursive: true)
         clonedEntity.generateCollisionShapes(recursive: true)
+        
+        // Install gestures and track changes for automatic saving
         arView.installGestures([.rotation, .translation], for: clonedEntity)
+        self.setupGestureTracking(for: clonedEntity, anchor: anchor, in: arView)
+        
         let anchorEntity = AnchorEntity(plane: .any)
         anchorEntity.addChild(clonedEntity)
         anchorEntity.anchoring = AnchoringComponent(anchor)
         arView.scene.addAnchor(anchorEntity)
         self.sceneManager.anchorEntities.append(anchorEntity)
+        
+        // Automatically save to Firebase using the entity's world transform (anchors don't move with gestures)
+        let worldTransform = clonedEntity.transformMatrix(relativeTo: nil)
+        self.saveModelArtifact(anchor: anchor, modelName: anchor.name?.replacingOccurrences(of: anchorNamePrefix, with: "") ?? "unknown", transform: worldTransform)
+    }
+    
+    // MARK: - Firebase Auto-Save Methods
+    
+    private func saveModelArtifact(anchor: ARAnchor, modelName: String, transform: simd_float4x4) {
+        let sceneId = sceneManager.getOrCreateSceneId()
+        let artifactId = UUID().uuidString
+        
+        // Track the artifact ID
+        sceneManager.artifactIds[anchor.identifier] = artifactId
+        sceneManager.artifactIdToAnchorId[artifactId] = anchor.identifier
+        
+        ArtifactSyncService.shared.saveArtifact(
+            id: artifactId,
+            type: .model,
+            sceneId: sceneId,
+            transform: transform,
+            modelName: modelName
+        ) { result in
+            switch result {
+            case .success:
+                print("✅ Auto-saved model artifact: \(artifactId)")
+            case .failure(let error):
+                print("❌ Failed to auto-save model artifact: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    private func saveAnnotationArtifact(anchor: ARAnchor, annotationId: UUID, text: String, transform: simd_float4x4) {
+        let sceneId = sceneManager.getOrCreateSceneId()
+        let artifactId = UUID().uuidString
+        
+        // Track the artifact ID
+        sceneManager.artifactIds[anchor.identifier] = artifactId
+        sceneManager.artifactIdToAnchorId[artifactId] = anchor.identifier
+        
+        ArtifactSyncService.shared.saveArtifact(
+            id: artifactId,
+            type: .annotation,
+            sceneId: sceneId,
+            transform: transform,
+            annotationText: text
+        ) { result in
+            switch result {
+            case .success:
+                print("✅ Auto-saved annotation artifact: \(artifactId)")
+            case .failure(let error):
+                print("❌ Failed to auto-save annotation artifact: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    private func updateArtifact(anchor: ARAnchor, transform: simd_float4x4? = nil, annotationText: String? = nil) {
+        guard let artifactId = sceneManager.artifactIds[anchor.identifier] else {
+            print("⚠️ No artifact ID found for anchor: \(anchor.identifier)")
+            return
+        }
+        
+        ArtifactSyncService.shared.updateArtifact(
+            id: artifactId,
+            transform: transform,
+            annotationText: annotationText
+        ) { result in
+            switch result {
+            case .success:
+                print("✅ Auto-updated artifact: \(artifactId)")
+            case .failure(let error):
+                print("❌ Failed to auto-update artifact: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    private func deleteArtifact(anchor: ARAnchor) {
+        guard let artifactId = sceneManager.artifactIds[anchor.identifier] else {
+            print("⚠️ No artifact ID found for anchor: \(anchor.identifier)")
+            return
+        }
+        
+        ArtifactSyncService.shared.deleteArtifact(id: artifactId) { result in
+            switch result {
+            case .success:
+                print("✅ Auto-deleted artifact: \(artifactId)")
+                // Clean up tracking
+                self.sceneManager.artifactIds.removeValue(forKey: anchor.identifier)
+                self.sceneManager.artifactIdToAnchorId.removeValue(forKey: artifactId)
+            case .failure(let error):
+                print("❌ Failed to auto-delete artifact: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    // Track gesture changes for automatic saving
+    private func setupGestureTracking(for entity: ModelEntity, anchor: ARAnchor, in arView: ARView) {
+        // Use a debounced approach to track transform changes, based on the entity's world transform
+        var lastSavedTransform = entity.transformMatrix(relativeTo: nil)
+        var updateTimer: Timer?
+        
+        // Capture sceneManager for use in closures (structs don't need weak references)
+        let manager = sceneManager
+        
+        // Subscribe to scene updates to check for transform changes
+        _ = arView.scene.subscribe(to: SceneEvents.Update.self) { _ in
+            // Check current world transform from the entity (gestures apply to the entity, not the anchor)
+            let currentTransform = entity.transformMatrix(relativeTo: nil)
+            
+            // Check if transform changed significantly (more than 1cm)
+            let positionDiff = simd_length(currentTransform.columns.3 - lastSavedTransform.columns.3)
+            
+            if positionDiff > 0.01 { // 1cm threshold
+                // Cancel previous timer
+                updateTimer?.invalidate()
+                
+                // Debounce: wait 0.5 seconds after last change before saving
+                updateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
+                    let finalTransform = entity.transformMatrix(relativeTo: nil)
+                    // Update artifact using captured sceneManager
+                    if let artifactId = manager.artifactIds[anchor.identifier] {
+                        ArtifactSyncService.shared.updateArtifact(
+                            id: artifactId,
+                            transform: finalTransform,
+                            annotationText: nil
+                        ) { result in
+                            switch result {
+                            case .success:
+                                print("✅ Auto-updated artifact: \(artifactId)")
+                            case .failure(let error):
+                                print("❌ Failed to auto-update artifact: \(error.localizedDescription)")
+                            }
+                        }
+                    }
+                    lastSavedTransform = finalTransform
+                }
+            }
+        }
+        
+        // For now, the timer will be cleaned up when the entity is removed
+    }
+    
+    // MARK: - Real-time Firebase Syncing
+    
+    private func setupFirebaseListener(sceneId: String, arView: ARView) {
+        ArtifactSyncService.shared.startListeningToScene(sceneId: sceneId,
+            onUpdate: { artifacts in
+                DispatchQueue.main.async {
+                    self.handleFirebaseArtifactUpdates(artifacts: artifacts, in: arView)
+                }
+            },
+            onError: { error in
+                print("❌ Firebase listener error: \(error.localizedDescription)")
+            }
+        )
+    }
+    
+    private func handleFirebaseArtifactUpdates(artifacts: [ArtifactData], in arView: ARView) {
+        // Avoid applying remote artifacts until we're relocalized to the scene
+        guard sceneManager.hasStartedArtifactSync else { return }
+
+        // Get current artifact IDs from Firebase
+        let firebaseArtifactIds = Set(artifacts.map { $0.id })
+        
+        // Get local artifact IDs
+        let localArtifactIds = Set(sceneManager.artifactIdToAnchorId.keys)
+        
+        // Find artifacts that were deleted remotely
+        let deletedIds = localArtifactIds.subtracting(firebaseArtifactIds)
+        for artifactId in deletedIds {
+            if let anchorId = sceneManager.artifactIdToAnchorId[artifactId],
+               let anchor = arView.session.currentFrame?.anchors.first(where: { $0.identifier == anchorId }) {
+                // Remove the anchor and entity
+                self.removeArtifactLocally(anchor: anchor, in: arView)
+            }
+        }
+        
+        // Process updates and new artifacts
+        for artifact in artifacts {
+            // Skip if this is our own artifact (to avoid conflicts)
+            if sceneManager.artifactIdToAnchorId[artifact.id] != nil {
+                // Update existing artifact if transform changed
+                if let anchorId = sceneManager.artifactIdToAnchorId[artifact.id],
+                   let anchor = arView.session.currentFrame?.anchors.first(where: { $0.identifier == anchorId }),
+                   let newTransform = ArtifactData.arrayToTransform(artifact.transform ?? []) {
+                    // Only update if transform is significantly different
+                    let currentTransform = anchor.transform
+                    let positionDiff = simd_length(newTransform.columns.3 - currentTransform.columns.3)
+                    if positionDiff > 0.01 {
+                        // Update the anchor transform (this will be handled by ARKit automatically)
+                        // For now, we'll let ARKit handle it through the world map
+                    }
+                }
+                continue
+            }
+            
+            // New artifact from another user - add it locally
+            if let transform = ArtifactData.arrayToTransform(artifact.transform ?? []) {
+                self.addRemoteArtifact(artifact: artifact, transform: transform, in: arView)
+            }
+        }
+    }
+    
+    private func removeArtifactLocally(anchor: ARAnchor, in arView: ARView) {
+        // Remove model entity if it's a model
+        if let anchorName = anchor.name, anchorName.hasPrefix(anchorNamePrefix) {
+            // Find anchor entity by matching the anchor name
+            // Since we store anchor entities with the same name pattern, we can match by name
+            // or by finding the anchor entity whose transform matches the ARAnchor's transform
+            if let index = sceneManager.anchorEntities.firstIndex(where: { anchorEntity in
+                // Match by checking if the anchor entity's position is close to the ARAnchor's position
+                let entityTransform = anchorEntity.transformMatrix(relativeTo: nil)
+                let anchorTransform = anchor.transform
+                let entityPos = SIMD3<Float>(entityTransform.columns.3.x, entityTransform.columns.3.y, entityTransform.columns.3.z)
+                let anchorPos = SIMD3<Float>(anchorTransform.columns.3.x, anchorTransform.columns.3.y, anchorTransform.columns.3.z)
+                let positionDiff = simd_length(entityPos - anchorPos)
+                return positionDiff < 0.05 // 5cm threshold for matching
+            }) {
+                sceneManager.anchorEntities[index].removeFromParent()
+                sceneManager.anchorEntities.remove(at: index)
+            }
+        }
+        
+        // Remove annotation if it's an annotation
+        if let anchorName = anchor.name, anchorName.hasPrefix(annotationNamePrefix) {
+            // Find annotation by anchor identifier
+            if let (id, _) = sceneManager.annotationAnchors.first(where: { $0.value.identifier == anchor.identifier }) {
+                sceneManager.annotationViews[id]?.removeFromSuperview()
+                sceneManager.deleteButtons[id]?.removeFromSuperview()
+                sceneManager.annotationViews.removeValue(forKey: id)
+                sceneManager.deleteButtons.removeValue(forKey: id)
+                sceneManager.annotationAnchors.removeValue(forKey: id)
+                sceneManager.isEditing.removeValue(forKey: id)
+                sceneManager.hasBeenTapped.removeValue(forKey: id)
+            }
+        }
+        
+        // Clean up tracking
+        if let artifactId = sceneManager.artifactIds[anchor.identifier] {
+            sceneManager.artifactIds.removeValue(forKey: anchor.identifier)
+            sceneManager.artifactIdToAnchorId.removeValue(forKey: artifactId)
+        }
+        
+        arView.session.remove(anchor: anchor)
+    }
+    
+    private func addRemoteArtifact(artifact: ArtifactData, transform: simd_float4x4, in arView: ARView) {
+        switch artifact.type {
+        case .model:
+            // Create ARAnchor for model
+            let modelName = artifact.modelName ?? "unknown"
+            let anchorName = anchorNamePrefix + modelName
+            let anchor = ARAnchor(name: anchorName, transform: transform)
+            arView.session.add(anchor: anchor)
+            
+            // Track the artifact ID after anchor is created
+            sceneManager.artifactIds[anchor.identifier] = artifact.id
+            sceneManager.artifactIdToAnchorId[artifact.id] = anchor.identifier
+            
+            // Load and place the model
+            if let model = modelsViewModel.models.first(where: { $0.name == modelName }) {
+                if model.modelEntity != nil {
+                    let modelAnchor = ModelAnchor(model: model, anchor: anchor)
+                    placementSettings.modelsConfirmedForPlacement.append(modelAnchor)
+                } else {
+                    model.asyncLoadModelEntity { completed, error in
+                        guard completed else { return }
+                        let modelAnchor = ModelAnchor(model: model, anchor: anchor)
+                        self.placementSettings.modelsConfirmedForPlacement.append(modelAnchor)
+                    }
+                }
+            }
+            
+        case .annotation:
+            // Create ARAnchor for annotation
+            let annotationText = artifact.annotationText ?? ""
+            let annotationId = UUID()
+            let payload = AnnotationData(id: annotationId, text: annotationText)
+            let name = annotationNamePrefix + encodeAnnotation(payload)
+            let anchor = ARAnchor(name: name, transform: transform)
+            arView.session.add(anchor: anchor)
+            
+            // Track the artifact ID after anchor is created
+            sceneManager.artifactIds[anchor.identifier] = artifact.id
+            sceneManager.artifactIdToAnchorId[artifact.id] = anchor.identifier
+            
+            attachAnnotationView(for: anchor, data: payload, on: arView)
+            sceneManager.hasBeenTapped[annotationId] = !annotationText.isEmpty
+        }
     }
     
     private func getTransformForPlacement(in arView: ARView) -> simd_float4x4? {
-        guard let query = arView.makeRaycastQuery(from: arView.center, allowing: .estimatedPlane, alignment: .any),
-              let result = arView.session.raycast(query).first else { return nil }
-        return result.worldTransform
+        let center = arView.center
+        let preferredQuery = arView.makeRaycastQuery(from: center, allowing: .existingPlaneGeometry, alignment: .any)
+        let fallbackQuery = arView.makeRaycastQuery(from: center, allowing: .estimatedPlane, alignment: .any)
+        let result = preferredQuery.flatMap { arView.session.raycast($0).first } ??
+                     fallbackQuery.flatMap { arView.session.raycast($0).first }
+        return result?.worldTransform
     }
     
     private func getTransformForPlacement(in arView: ARView, at point: CGPoint) -> simd_float4x4? {
-        guard let query = arView.makeRaycastQuery(from: point, allowing: .estimatedPlane, alignment: .any),
-              let result = arView.session.raycast(query).first else { return nil }
-        return result.worldTransform
+        let preferredQuery = arView.makeRaycastQuery(from: point, allowing: .existingPlaneGeometry, alignment: .any)
+        let fallbackQuery = arView.makeRaycastQuery(from: point, allowing: .estimatedPlane, alignment: .any)
+        let result = preferredQuery.flatMap { arView.session.raycast($0).first } ??
+                     fallbackQuery.flatMap { arView.session.raycast($0).first }
+        return result?.worldTransform
     }
 }
 
@@ -283,7 +598,54 @@ class SceneManager: ObservableObject {
 
     var shouldSaveSceneToCloud = false
     var shouldLoadSceneFromCloud = false
-    var selectedCloudSceneId: String?
+    var selectedCloudSceneId: String? {
+        didSet {
+            // Persist scene ID to UserDefaults
+            if let sceneId = selectedCloudSceneId {
+                UserDefaults.standard.set(sceneId, forKey: "currentSceneId")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "currentSceneId")
+            }
+        }
+    }
+    
+    // Track artifact IDs for Firebase syncing
+    // Maps ARAnchor identifier to artifact ID (UUID string)
+    var artifactIds: [UUID: String] = [:]
+    // Maps artifact ID to ARAnchor identifier
+    var artifactIdToAnchorId: [String: UUID] = [:]
+
+    // Artifact sync gating (ensures relocalization before loading/streaming)
+    var pendingSceneIdForArtifacts: String?
+    var hasRelocalizedForArtifacts: Bool = false
+    var hasStartedArtifactSync: Bool = false
+    var shouldAttemptSceneAutoMatch: Bool = false
+    var autoMatchCandidates: [CloudSceneMeta] = []
+    var autoMatchIndex: Int = 0
+    var autoMatchAttemptInProgress: Bool = false
+    var autoMatchTimer: Timer?
+    var autoMatchCurrentSceneIdCandidate: String?
+
+    // Auto-load state for last scene on cold start
+    var shouldAutoloadLastScene: Bool = false
+    
+    init() {
+        // Load scene ID from UserDefaults on init
+        if let savedSceneId = UserDefaults.standard.string(forKey: "currentSceneId") {
+            self.selectedCloudSceneId = savedSceneId
+            self.shouldAutoloadLastScene = true
+        }
+    }
+    
+    func getOrCreateSceneId() -> String {
+        if let existingId = selectedCloudSceneId {
+            return existingId
+        }
+        // Create new scene ID
+        let newSceneId = UUID().uuidString
+        selectedCloudSceneId = newSceneId
+        return newSceneId
+    }
     
     lazy var persistenceUrl: URL = {
         do {
@@ -321,7 +683,7 @@ extension ARViewContainer {
         }
         
         switch currentFrame.worldMappingStatus {
-        case .mapped, .extending:
+        case .mapped:
             self.sceneManager.isPersistenceAvailable = !self.sceneManager.anchorEntities.isEmpty
         default:
             self.sceneManager.isPersistenceAvailable = false
@@ -329,7 +691,18 @@ extension ARViewContainer {
     }
     
     private func handlePersistence(for arView: CustomARView) {
+        // Try to automatically match the current environment to an existing scene (sequential relocalization attempts)
+        if self.sceneManager.shouldAttemptSceneAutoMatch && !self.sceneManager.autoMatchAttemptInProgress {
+            self.startSceneAutoMatch(on: arView)
+            return
+        }
+
         if self.sceneManager.shouldSaveSceneToCloud {
+            // Only allow save once mapping is fully established to reduce drift on restore
+            guard arView.session.currentFrame?.worldMappingStatus == .mapped else {
+                print("ℹ️ Waiting for fully mapped world before saving scene to cloud")
+                return
+            }
             self.sceneManager.shouldSaveSceneToCloud = false
             arView.session.getCurrentWorldMap { map, err in
                 guard let map = map else { print("No world map:", err?.localizedDescription ?? ""); return }
@@ -347,6 +720,11 @@ extension ARViewContainer {
             self.sceneManager.shouldLoadSceneFromCloud = false
             self.modelsViewModel.clearModelEntityFromMemory()
             self.sceneManager.anchorEntities.removeAll(keepingCapacity: true)
+            self.sceneManager.hasStartedArtifactSync = false
+            self.sceneManager.hasRelocalizedForArtifacts = false
+            self.sceneManager.artifactIds.removeAll()
+            self.sceneManager.artifactIdToAnchorId.removeAll()
+            ArtifactSyncService.shared.stopAllListeners()
             
             // Clear any existing 2D views + buttons
             for (_, view) in self.sceneManager.annotationViews { view.removeFromSuperview() }
@@ -358,10 +736,13 @@ extension ARViewContainer {
             self.sceneManager.hasBeenTapped.removeAll(keepingCapacity: true)
 
             if let id = self.sceneManager.selectedCloudSceneId {
+                self.sceneManager.selectedCloudSceneId = id
+                self.sceneManager.pendingSceneIdForArtifacts = id
                 CloudSceneStore.load(sceneId: id) { result in
                     switch result {
                     case .success(let data):
                         ScenePersistenceHelper.loadScene(for: arView, with: data)
+                        // Artifacts will load after relocalization
                     case .failure(let error):
                         print("Cloud load failed:", error)
                     }
@@ -371,7 +752,9 @@ extension ARViewContainer {
                     switch result {
                     case .success(let payload):
                         self.sceneManager.selectedCloudSceneId = payload.id
+                        self.sceneManager.pendingSceneIdForArtifacts = payload.id
                         ScenePersistenceHelper.loadScene(for: arView, with: payload.data)
+                        // Artifacts will load after relocalization
                     case .failure(let error):
                         print("Cloud load (latest) failed:", error)
                     }
@@ -380,12 +763,134 @@ extension ARViewContainer {
             return
         }
     }
+    
+    // Load artifacts from Firebase when scene is loaded
+    private func loadArtifactsFromFirebase(sceneId: String, arView: ARView) {
+        ArtifactSyncService.shared.loadSceneArtifacts(sceneId: sceneId) { result in
+            switch result {
+            case .success(let artifacts):
+                DispatchQueue.main.async {
+                    // Add artifacts that aren't already loaded
+                    for artifact in artifacts {
+                        // Skip if we already have this artifact
+                        if self.sceneManager.artifactIdToAnchorId[artifact.id] != nil {
+                            continue
+                        }
+                        
+                        if let transform = ArtifactData.arrayToTransform(artifact.transform ?? []) {
+                            self.addRemoteArtifact(artifact: artifact, transform: transform, in: arView)
+                        }
+                    }
+                }
+            case .failure(let error):
+                print("❌ Failed to load artifacts from Firebase: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // Begin Firebase syncing only after the session is relocalized to the target scene
+    private func startArtifactSyncIfReady(arView: ARView) {
+        guard sceneManager.hasRelocalizedForArtifacts else { return }
+        guard let sceneId = sceneManager.pendingSceneIdForArtifacts else { return }
+        guard !sceneManager.hasStartedArtifactSync else { return }
+
+        sceneManager.hasStartedArtifactSync = true
+        setupFirebaseListener(sceneId: sceneId, arView: arView)
+        loadArtifactsFromFirebase(sceneId: sceneId, arView: arView)
+    }
+
+    // MARK: - Scene Auto-Match (attempt relocalization against user's saved scenes)
+
+    private func startSceneAutoMatch(on arView: CustomARView) {
+        sceneManager.autoMatchAttemptInProgress = true
+        CloudSceneStore.fetchAllSceneMeta(limit: 10) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let metas):
+                    guard !metas.isEmpty else {
+                        self.sceneManager.shouldAttemptSceneAutoMatch = false
+                        self.sceneManager.autoMatchAttemptInProgress = false
+                        return
+                    }
+                    self.sceneManager.autoMatchCandidates = metas
+                    self.sceneManager.autoMatchIndex = 0
+                    self.tryNextSceneAutoMatch(on: arView)
+                case .failure(let error):
+                    print("❌ Scene auto-match fetch failed:", error.localizedDescription)
+                    self.sceneManager.shouldAttemptSceneAutoMatch = false
+                    self.sceneManager.autoMatchAttemptInProgress = false
+                }
+            }
+        }
+    }
+
+    private func tryNextSceneAutoMatch(on arView: CustomARView) {
+        // End of list
+        guard sceneManager.autoMatchIndex < sceneManager.autoMatchCandidates.count else {
+            sceneManager.shouldAttemptSceneAutoMatch = false
+            sceneManager.autoMatchAttemptInProgress = false
+            sceneManager.autoMatchTimer?.invalidate()
+            sceneManager.autoMatchTimer = nil
+            sceneManager.autoMatchCurrentSceneIdCandidate = nil
+            sceneManager.pendingSceneIdForArtifacts = nil
+            // Clear any persisted scene id so new placements create a fresh scene
+            sceneManager.selectedCloudSceneId = nil
+            print("ℹ️ No matching scene found; auto-match exhausted.")
+            return
+        }
+
+        let meta = sceneManager.autoMatchCandidates[sceneManager.autoMatchIndex]
+        sceneManager.autoMatchIndex += 1
+
+        // Reset listeners/state before attempting another map
+        ArtifactSyncService.shared.stopAllListeners()
+        sceneManager.anchorEntities.removeAll(keepingCapacity: true)
+        sceneManager.hasRelocalizedForArtifacts = false
+        sceneManager.hasStartedArtifactSync = false
+        sceneManager.pendingSceneIdForArtifacts = meta.id
+        sceneManager.autoMatchCurrentSceneIdCandidate = meta.id
+        // Clear 2D overlays
+        for (_, view) in sceneManager.annotationViews { view.removeFromSuperview() }
+        for (_, btn) in sceneManager.deleteButtons { btn.removeFromSuperview() }
+        sceneManager.annotationViews.removeAll(keepingCapacity: true)
+        sceneManager.deleteButtons.removeAll(keepingCapacity: true)
+        sceneManager.annotationAnchors.removeAll(keepingCapacity: true)
+        sceneManager.isEditing.removeAll(keepingCapacity: true)
+        sceneManager.hasBeenTapped.removeAll(keepingCapacity: true)
+
+        CloudSceneStore.load(sceneId: meta.id) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let data):
+                    print("🔄 Attempting auto-match with scene:", meta.id)
+                    ScenePersistenceHelper.loadScene(for: arView, with: data)
+                    // If we don't relocalize to this map within the window, try the next one
+                    self.sceneManager.autoMatchTimer?.invalidate()
+                    self.sceneManager.autoMatchTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { _ in
+                        if !self.sceneManager.hasRelocalizedForArtifacts {
+                            self.tryNextSceneAutoMatch(on: arView)
+                        } else {
+                            // Success; stop timer chain
+                            self.sceneManager.autoMatchAttemptInProgress = false
+                            self.sceneManager.shouldAttemptSceneAutoMatch = false
+                        }
+                    }
+                case .failure(let error):
+                    print("❌ Failed to load scene \(meta.id) for auto-match:", error.localizedDescription)
+                    self.tryNextSceneAutoMatch(on: arView)
+                }
+            }
+        }
+    }
 }
 
 extension ARViewContainer {
     class Coordinator: NSObject, ARSessionDelegate, UITextViewDelegate {
         var parent: ARViewContainer
         weak var arView: ARView?
+        private var relocalizationRetryCount = 0
+        private var relocalizationRetryWorkItem: DispatchWorkItem?
+        private var stableRelocalizedFrameCount = 0
         
         init(_ parent: ARViewContainer) {
             self.parent = parent
@@ -396,6 +901,72 @@ extension ARViewContainer {
             button.addTarget(self, action: #selector(handleDeleteButton(_:)), for: .touchUpInside)
             // Store association by reusing the sceneManager map (keyed by id)
             parent.sceneManager.deleteButtons[id] = button
+        }
+
+        private func resetRelocalizationState() {
+            parent.sceneManager.hasRelocalizedForArtifacts = false
+            parent.sceneManager.hasStartedArtifactSync = false
+            relocalizationRetryWorkItem?.cancel()
+            relocalizationRetryWorkItem = nil
+            relocalizationRetryCount = 0
+            stableRelocalizedFrameCount = 0
+        }
+
+        private func scheduleRelocalizationRetry(arView: ARView, session: ARSession) {
+            guard !parent.sceneManager.hasStartedArtifactSync else { return }
+            relocalizationRetryWorkItem?.cancel()
+            relocalizationRetryCount = 0
+            attemptRelocalization(arView: arView, session: session)
+        }
+
+        private func attemptRelocalization(arView: ARView, session: ARSession) {
+            guard relocalizationRetryCount < 10 else { return }
+            relocalizationRetryWorkItem?.cancel()
+            let workItem = DispatchWorkItem { [weak self, weak arView, weak session] in
+                guard let self = self, let arView = arView, let session = session else { return }
+                self.evaluateRelocalization(arView: arView, session: session, isRetry: true)
+            }
+            relocalizationRetryWorkItem = workItem
+            relocalizationRetryCount += 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
+        }
+
+        private func evaluateRelocalization(arView: ARView, session: ARSession, isRetry: Bool = false) {
+            let trackingState = session.currentFrame?.camera.trackingState ?? .notAvailable
+            let mappingStatus = session.currentFrame?.worldMappingStatus ?? .notAvailable
+            let hasGoodMapping = (mappingStatus == .mapped)
+
+            if case .normal = trackingState, hasGoodMapping {
+                stableRelocalizedFrameCount += 1
+                if stableRelocalizedFrameCount >= 3 { // require a few consecutive mapped frames for stability
+                    parent.sceneManager.hasRelocalizedForArtifacts = true
+                    // Stop any auto-match timers now that we have a match
+                    parent.sceneManager.autoMatchTimer?.invalidate()
+                    parent.sceneManager.autoMatchTimer = nil
+                    parent.sceneManager.autoMatchAttemptInProgress = false
+                    parent.sceneManager.shouldAttemptSceneAutoMatch = false
+                    // Only commit the auto-match candidate once relocalized
+                    if let candidate = parent.sceneManager.autoMatchCurrentSceneIdCandidate {
+                        parent.sceneManager.selectedCloudSceneId = candidate
+                        parent.sceneManager.pendingSceneIdForArtifacts = candidate
+                        parent.sceneManager.autoMatchCurrentSceneIdCandidate = nil
+                    }
+                    parent.startArtifactSyncIfReady(arView: arView)
+                    relocalizationRetryWorkItem?.cancel()
+                    relocalizationRetryWorkItem = nil
+                    relocalizationRetryCount = 0
+                    return
+                }
+            } else {
+                stableRelocalizedFrameCount = 0
+            }
+
+            parent.sceneManager.hasRelocalizedForArtifacts = false
+            if !isRetry {
+                scheduleRelocalizationRetry(arView: arView, session: session)
+            } else {
+                attemptRelocalization(arView: arView, session: session)
+            }
         }
 
         @objc func handleTapToPlaceAnnotation(_ gesture: UITapGestureRecognizer) {
@@ -449,6 +1020,18 @@ extension ARViewContainer {
                             arView.session.add(anchor: newAnchor)
                             arView.session.remove(anchor: oldAnchor)
                             parent.sceneManager.annotationAnchors[editingId] = newAnchor
+                            
+                            // Update artifact ID mapping
+                            if let artifactId = parent.sceneManager.artifactIds[oldAnchor.identifier] {
+                                parent.sceneManager.artifactIds.removeValue(forKey: oldAnchor.identifier)
+                                parent.sceneManager.artifactIds[newAnchor.identifier] = artifactId
+                                parent.sceneManager.artifactIdToAnchorId[artifactId] = newAnchor.identifier
+                                // Update existing artifact
+                                parent.updateArtifact(anchor: newAnchor, annotationText: tv.text)
+                            } else {
+                                // First-time save after text entry
+                                parent.saveAnnotationArtifact(anchor: newAnchor, annotationId: editingId, text: tv.text, transform: transform)
+                            }
                         }
                     }
                 }
@@ -483,6 +1066,8 @@ extension ARViewContainer {
             }
             // Remove anchor and state
             if let anchor = parent.sceneManager.annotationAnchors[id] {
+                // Automatically delete from Firebase
+                parent.deleteArtifact(anchor: anchor)
                 arView.session.remove(anchor: anchor)
             }
             parent.sceneManager.annotationViews[id] = nil
@@ -503,6 +1088,27 @@ extension ARViewContainer {
                     parent.hideDeleteButton(for: id)
                 }
             }
+        }
+
+        // Track relocalization; only sync artifacts after we're aligned to the saved world map
+        func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
+            guard let arView = arView else { return }
+            evaluateRelocalization(arView: arView, session: session)
+        }
+
+        func sessionWasInterrupted(_ session: ARSession) {
+            resetRelocalizationState()
+        }
+
+        func sessionInterruptionEnded(_ session: ARSession) {
+            guard let arView = arView else { return }
+            evaluateRelocalization(arView: arView, session: session)
+        }
+
+        func session(_ session: ARSession, didFailWithError error: Error) {
+            resetRelocalizationState()
+            guard let arView = arView else { return }
+            scheduleRelocalizationRetry(arView: arView, session: session)
         }
         
         // ARSession: anchors added (from live placement or from Cloud load)

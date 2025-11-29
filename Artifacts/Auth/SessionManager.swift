@@ -103,6 +103,17 @@ class SessionManager: ObservableObject {
                 self.userData = data
             } else if let error = error {
                 print("Error fetching user data: \(error.localizedDescription)")
+                // Best-effort fallback to auth user fields
+                self.userData = [
+                    "username": self.user?.email?.components(separatedBy: "@").first ?? "anonymous_user",
+                    "email": self.user?.email ?? ""
+                ]
+            } else {
+                // No data returned; populate a lightweight default so UI doesn't show anonymous
+                self.userData = [
+                    "username": self.user?.email?.components(separatedBy: "@").first ?? "anonymous_user",
+                    "email": self.user?.email ?? ""
+                ]
             }
         }
     }
@@ -188,4 +199,3 @@ class SessionManager: ObservableObject {
         }
     }
 }
-

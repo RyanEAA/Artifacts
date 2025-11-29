@@ -31,7 +31,13 @@ struct QuickProfileView: View {
     )
 
     private var username: String {
-        (session.userData?["username"] as? String) ?? "anonymous_user"
+        if let name = session.userData?["username"] as? String, !name.isEmpty {
+            return name
+        }
+        if let email = session.user?.email, !email.isEmpty {
+            return email.components(separatedBy: "@").first ?? email
+        }
+        return "anonymous_user"
     }
 
     var body: some View {

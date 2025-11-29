@@ -36,17 +36,6 @@ struct ContentView: View {
         .edgesIgnoringSafeArea(.all)
         .onAppear() {
             self.modelsViewModel.fetchData()
-            self.ensureSignedIn()
-        }
-    }
-    func ensureSignedIn() {
-        if Auth.auth().currentUser == nil {
-            Auth.auth().signInAnonymously { result, error in
-                if let error = error { print("Anon sign-in failed:", error) }
-                else { print("Signed in as:", result?.user.uid ?? "nil") }
-            }
-        } else {
-            print("Already signed in:", Auth.auth().currentUser?.uid ?? "nil")
         }
     }
 }

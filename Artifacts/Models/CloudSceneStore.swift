@@ -142,4 +142,35 @@ extension CloudSceneStore {
             }
         }
     }
+
+    /// Fetch all scenes for the current user, sorted by updatedAt desc (bounded by `limit`)
+    static func fetchAllSceneMeta(limit: Int = 10, completion: @escaping (Result<[CloudSceneMeta], Error>) -> Void) {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            return completion(.success([]))
+        }
+
+        db.collection("scenes")
+            .whereField("ownerUid", isEqualTo: uid)
+            .order(by: "updatedAt", descending: true)
+            .limit(to: limit)
+            .getDocuments { snap, err in
+                if let err = err { return completion(.failure(err)) }
+
+                let metas: [CloudSceneMeta] = snap?.documents.compactMap { doc in
+                    let data = doc.data()
+                    let name = data["name"] as? String ?? "Untitled"
+                    let storagePath = data["storagePath"] as? String ?? ""
+                    let ts = (data["updatedAt"] as? Timestamp)?.dateValue() ?? Date()
+                    let bytes = data["bytes"] as? Int ?? 0
+
+                    return CloudSceneMeta(id: doc.documentID,
+                                          name: name,
+                                          storagePath: storagePath,
+                                          updatedAt: ts,
+                                          bytes: bytes)
+                } ?? []
+
+                completion(.success(metas))
+            }
+    }
 }

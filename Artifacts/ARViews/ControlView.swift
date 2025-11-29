@@ -68,60 +68,9 @@ struct SceneButtons: View {
     @EnvironmentObject var sceneManager: SceneManager
 
     var body: some View {
-        // SAVE (cloud)
-        ControlButton(systemIconName: "icloud.and.arrow.up") {
-            print("Save Scene Button Pressed..")
-            sceneManager.shouldSaveSceneToCloud = true
-        }
-        .hidden(!sceneManager.isPersistenceAvailable)
-
-        Spacer()
-
-        // ControlView.swift → SceneButtons
-
-        // LOAD (cloud)
-        ControlButton(systemIconName: "icloud.and.arrow.down") {
-            print("Load Scene Button Pressed")
-
-            // Re-fetch latest id on tap, then trigger load
-            CloudSceneStore.fetchMostRecentSceneMeta { result in
-                switch result {
-                case .success(let meta):
-                    if let meta {
-                        DispatchQueue.main.async {
-                            self.sceneManager.selectedCloudSceneId = meta.id
-                            self.sceneManager.shouldLoadSceneFromCloud = true  // ARViewContainer will do the actual load
-                        }
-                    } else {
-                        print("No cloud scene found to load.")
-                    }
-                case .failure(let e):
-                    print("Failed to fetch latest scene meta on tap:", e)
-                }
-            }
-        }
-        .hidden(sceneManager.selectedCloudSceneId == nil) // shows once we have *some* id
-
-        .onAppear {
-            // Prime (fetch-only) the newest id so the Load button shows up, but DON'T load yet
-            CloudSceneStore.fetchMostRecentSceneMeta { result in
-                switch result {
-                case .success(let meta):
-                    if let meta {
-                        DispatchQueue.main.async {
-                            self.sceneManager.selectedCloudSceneId = meta.id // just set id; no load flag here
-                        }
-                    }
-                case .failure(let e):
-                    print("Failed to fetch latest scene meta on appear:", e)
-                }
-            }
-        }
-
-
-
-        Spacer()
-
+        // Save/Load buttons removed - now automatic
+        // Only show clear scene button
+        
         ControlButton(systemIconName: "trash") {
             print("clear scene button pressed")
             // Remove all 3D anchor entities
