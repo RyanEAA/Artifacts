@@ -60,15 +60,9 @@ struct ARViewContainer: UIViewRepresentable {
         self.sceneManager.hasLoadedWorldMap = false
         self.sceneManager.artifactIds.removeAll()
         self.sceneManager.artifactIdToAnchorId.removeAll()
-        // If we already have a stored scene ID, prefer loading it first; otherwise try auto-match.
-        self.sceneManager.shouldAttemptSceneAutoMatch = (self.sceneManager.selectedCloudSceneId == nil)
+        // Always start in auto-match mode; never autoload a prior scene.
+        self.sceneManager.shouldAttemptSceneAutoMatch = true
         self.sceneManager.bindLocationProvider(self.locationProvider)
-
-        // On cold start, automatically load the last cloud scene if one exists
-        if self.sceneManager.shouldAutoloadLastScene {
-            self.sceneManager.shouldAutoloadLastScene = false
-            self.sceneManager.shouldLoadSceneFromCloud = true
-        }
         
         // Artifacts will begin syncing once the session relocalizes to the scene
         
@@ -674,11 +668,11 @@ class SceneManager: ObservableObject {
     var autoMatchSearchRadiusMeters: Double = 150
 
     init() {
-        // Load scene ID from UserDefaults on init
-        if let savedSceneId = UserDefaults.standard.string(forKey: "currentSceneId") {
-            self.selectedCloudSceneId = savedSceneId
-            self.shouldAutoloadLastScene = true
-        }
+        // Do not autoload prior scenes; clear persisted selection
+        UserDefaults.standard.removeObject(forKey: "currentSceneId")
+        self.selectedCloudSceneId = nil
+        self.shouldAutoloadLastScene = false
+        self.shouldAttemptSceneAutoMatch = true
     }
 
     func bindLocationProvider(_ provider: LocationProvider) {
@@ -919,17 +913,17 @@ extension ARViewContainer {
         sceneManager.hasLoadedWorldMap = false
         sceneManager.isRelocalizingToLoadedScene = false
         let searchRadius = sceneManager.autoMatchSearchRadiusMeters
-        if let location = sceneManager.lastKnownLocation {
-            CloudSceneStore.fetchNearbySceneMeta(center: location.coordinate, radiusMeters: searchRadius, limit: 10) { result in
-                DispatchQueue.main.async {
-                    self.handleAutoMatchMetaResult(result, on: arView)
-                }
-            }
-        } else {
-            CloudSceneStore.fetchAllSceneMeta(limit: 10, onlyCurrentUser: true) { result in
-                DispatchQueue.main.async {
-                    self.handleAutoMatchMetaResult(result, on: arView)
-                }
+        guard let location = sceneManager.lastKnownLocation else {
+            print("ℹ️ Auto-match skipped: no location available yet; starting a new scene.")
+            self.sceneManager.shouldAttemptSceneAutoMatch = false
+            self.sceneManager.autoMatchAttemptInProgress = false
+            self.startNewSceneSession()
+            return
+        }
+
+        CloudSceneStore.fetchNearbySceneMeta(center: location.coordinate, radiusMeters: searchRadius, limit: 10) { result in
+            DispatchQueue.main.async {
+                self.handleAutoMatchMetaResult(result, on: arView)
             }
         }
     }
@@ -938,9 +932,10 @@ extension ARViewContainer {
         switch result {
         case .success(let metas):
             guard !metas.isEmpty else {
+                print("ℹ️ Auto-match: no nearby scenes; starting a new scene.")
                 self.sceneManager.shouldAttemptSceneAutoMatch = false
                 self.sceneManager.autoMatchAttemptInProgress = false
-                print("ℹ️ Auto-match: no nearby scenes found for user.")
+                self.startNewSceneSession()
                 return
             }
             self.sceneManager.autoMatchCandidates = metas
@@ -951,6 +946,7 @@ extension ARViewContainer {
             print("❌ Scene auto-match fetch failed:", error.localizedDescription)
             self.sceneManager.shouldAttemptSceneAutoMatch = false
             self.sceneManager.autoMatchAttemptInProgress = false
+            self.startNewSceneSession()
         }
     }
 
