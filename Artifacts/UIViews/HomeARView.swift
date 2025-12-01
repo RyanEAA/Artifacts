@@ -127,4 +127,10 @@ struct HomeARView: View {
 }
 #Preview {
     HomeARView()
+        .environmentObject(PlacementSettings())
+        .environmentObject(SessionSettings())
+        .environmentObject(SceneManager())
+        .environmentObject(ModelsViewModel())
+        .environmentObject(ModelDeletionManager())
+        .environmentObject(LocationProvider())
 }

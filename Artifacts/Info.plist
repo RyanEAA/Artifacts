@@ -15,5 +15,7 @@
 		<string>Poppins-Thin.ttf</string>
 		<string>FingerPaint-Regular.ttf</string>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>We use your location to prioritize nearby saved AR scenes for faster loading.</string>
 </dict>
 </plist>

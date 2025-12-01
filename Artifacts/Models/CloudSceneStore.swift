@@ -10,8 +10,16 @@ import Firebase
 import FirebaseStorage
 import FirebaseFirestore
 import FirebaseAuth
+import CoreLocation
 
 enum CloudSceneError: Error { case noUser, uploadFailed(String), downloadFailed(String) }
+
+struct SceneLocationMeta {
+    let coordinate: CLLocationCoordinate2D
+    let altitude: Double?
+    let horizontalAccuracy: Double?
+    let heading: Double?
+}
 
 final class CloudSceneStore {
     static let storage = Storage.storage()
@@ -25,10 +33,45 @@ final class CloudSceneStore {
         storage.reference(withPath: storagePath)
     }
 
+    /// Ensure a scene document exists for a given ID so that artifact writes pass security rules.
+    static func ensureSceneDocument(
+        sceneId: String,
+        name: String = "Scene",
+        location: SceneLocationMeta? = nil,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            return completion(.failure(CloudSceneError.noUser))
+        }
+
+        var doc: [String: Any] = [
+            "ownerUid": uid,
+            "name": name,
+            "updatedAt": Timestamp(date: Date())
+        ]
+
+        if let loc = location {
+            doc["lat"] = loc.coordinate.latitude
+            doc["lon"] = loc.coordinate.longitude
+            doc["alt"] = loc.altitude
+            doc["hAcc"] = loc.horizontalAccuracy
+            doc["heading"] = loc.heading
+        }
+
+        db.collection("scenes").document(sceneId).setData(doc, merge: true) { error in
+            if let error = error {
+                completion(.failure(error))
+            } else {
+                completion(.success(()))
+            }
+        }
+    }
+
     static func save(
         data: Data,
         sceneId: String = UUID().uuidString,
         name: String = "My Scene",
+        location: SceneLocationMeta? = nil,
         completion: @escaping (Result<String, Error>) -> Void
     ) {
         // Ensure a user exists (required for security rules)
@@ -51,24 +94,32 @@ final class CloudSceneStore {
                 return completion(.failure(CloudSceneError.uploadFailed(uploadError.localizedDescription)))
             }
 
-            print("✅ Upload complete. Writing Firestore metadata...")
+        print("✅ Upload complete. Writing Firestore metadata...")
 
-            // Metadata for Firestore
-            let doc: [String: Any] = [
-                "ownerUid": uid,
-                "name": name,
-                "storagePath": ref.fullPath,
-                "updatedAt": Timestamp(date: Date()),
-                "bytes": data.count
-            ]
+        // Metadata for Firestore
+        let doc: [String: Any] = [
+            "ownerUid": uid,
+            "name": name,
+            "storagePath": ref.fullPath,
+            "updatedAt": Timestamp(date: Date()),
+            "bytes": data.count
+        ]
+        var mutableDoc = doc
+        if let loc = location {
+            mutableDoc["lat"] = loc.coordinate.latitude
+            mutableDoc["lon"] = loc.coordinate.longitude
+            mutableDoc["alt"] = loc.altitude
+            mutableDoc["hAcc"] = loc.horizontalAccuracy
+            mutableDoc["heading"] = loc.heading
+        }
 
-            // Write to Firestore
-            self.db.collection("scenes").document(sceneId).setData(doc, merge: true) { error in
-                if let error = error {
-                    print("❌ Firestore write failed:", error.localizedDescription)
-                    completion(.failure(error))
-                } else {
-                    print("✅ Firestore entry created for scene:", sceneId)
+        // Write to Firestore
+        self.db.collection("scenes").document(sceneId).setData(mutableDoc, merge: true) { error in
+            if let error = error {
+                print("❌ Firestore write failed:", error.localizedDescription)
+                completion(.failure(error))
+            } else {
+                print("✅ Firestore entry created for scene:", sceneId)
                     completion(.success(sceneId))
                 }
             }
@@ -104,6 +155,12 @@ struct CloudSceneMeta {
     let storagePath: String
     let updatedAt: Date
     let bytes: Int
+    let latitude: Double?
+    let longitude: Double?
+    let altitude: Double?
+    let horizontalAccuracy: Double?
+    let heading: Double?
+    var distanceFromQueryMeters: Double?
 }
 
 extension CloudSceneStore {
@@ -126,12 +183,23 @@ extension CloudSceneStore {
                 let storagePath = data["storagePath"] as? String ?? ""
                 let ts = (data["updatedAt"] as? Timestamp)?.dateValue() ?? Date()
                 let bytes = data["bytes"] as? Int ?? 0
+                let lat = data["lat"] as? Double
+                let lon = data["lon"] as? Double
+                let alt = data["alt"] as? Double
+                let hAcc = data["hAcc"] as? Double
+                let heading = data["heading"] as? Double
 
                 completion(.success(CloudSceneMeta(id: doc.documentID,
                                                    name: name,
                                                    storagePath: storagePath,
                                                    updatedAt: ts,
-                                                   bytes: bytes)))
+                                                   bytes: bytes,
+                                                   latitude: lat,
+                                                   longitude: lon,
+                                                   altitude: alt,
+                                                   horizontalAccuracy: hAcc,
+                                                   heading: heading,
+                                                   distanceFromQueryMeters: nil)))
             }
     }
 
@@ -159,29 +227,129 @@ extension CloudSceneStore {
         }
     }
 
-    /// Fetch all scenes for the current user, sorted by updatedAt desc (bounded by `limit`)
-    static func fetchAllSceneMeta(limit: Int = 10, completion: @escaping (Result<[CloudSceneMeta], Error>) -> Void) {
-        db.collection("scenes")
+    /// Fetch scenes for the current user inside a lat/lon bounding box (client will refine by distance).
+    static func fetchNearbySceneMeta(
+        center: CLLocationCoordinate2D,
+        radiusMeters: Double = 150,
+        limit: Int = 10,
+        completion: @escaping (Result<[CloudSceneMeta], Error>) -> Void
+    ) {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            return completion(.success([]))
+        }
+
+        let bounds = boundingBox(for: center, radiusMeters: radiusMeters)
+
+        var query: Query = db.collection("scenes")
+            .whereField("ownerUid", isEqualTo: uid)
+            .whereField("lat", isGreaterThan: bounds.minLat)
+            .whereField("lat", isLessThan: bounds.maxLat)
+            .whereField("lon", isGreaterThan: bounds.minLon)
+            .whereField("lon", isLessThan: bounds.maxLon)
             .order(by: "updatedAt", descending: true)
             .limit(to: limit)
-            .getDocuments { snap, err in
-                if let err = err { return completion(.failure(err)) }
 
-                let metas: [CloudSceneMeta] = snap?.documents.compactMap { doc in
-                    let data = doc.data()
-                    let name = data["name"] as? String ?? "Untitled"
-                    let storagePath = data["storagePath"] as? String ?? ""
-                    let ts = (data["updatedAt"] as? Timestamp)?.dateValue() ?? Date()
-                    let bytes = data["bytes"] as? Int ?? 0
+        query.getDocuments { snap, err in
+            if let err = err { return completion(.failure(err)) }
 
-                    return CloudSceneMeta(id: doc.documentID,
-                                          name: name,
-                                          storagePath: storagePath,
-                                          updatedAt: ts,
-                                          bytes: bytes)
-                } ?? []
+            let metas: [CloudSceneMeta] = snap?.documents.compactMap { doc in
+                let data = doc.data()
+                guard let lat = data["lat"] as? Double,
+                      let lon = data["lon"] as? Double else {
+                    return nil // skip scenes without coordinates in a geo-filtered query
+                }
+                let name = data["name"] as? String ?? "Untitled"
+                let storagePath = data["storagePath"] as? String ?? ""
+                let ts = (data["updatedAt"] as? Timestamp)?.dateValue() ?? Date()
+                let bytes = data["bytes"] as? Int ?? 0
+                let alt = data["alt"] as? Double
+                let hAcc = data["hAcc"] as? Double
+                let heading = data["heading"] as? Double
+                let distance = Self.haversineDistanceMeters(from: center, to: CLLocationCoordinate2D(latitude: lat, longitude: lon))
+                return CloudSceneMeta(id: doc.documentID,
+                                      name: name,
+                                      storagePath: storagePath,
+                                      updatedAt: ts,
+                                      bytes: bytes,
+                                      latitude: lat,
+                                      longitude: lon,
+                                      altitude: alt,
+                                      horizontalAccuracy: hAcc,
+                                      heading: heading,
+                                      distanceFromQueryMeters: distance)
+            } ?? []
 
-                completion(.success(metas))
+            // Sort by distance first, then recency
+            let sorted = metas.sorted { lhs, rhs in
+                if let dl = lhs.distanceFromQueryMeters, let dr = rhs.distanceFromQueryMeters {
+                    if abs(dl - dr) > 1 {
+                        return dl < dr
+                    }
+                }
+                return lhs.updatedAt > rhs.updatedAt
             }
+
+            completion(.success(sorted))
+        }
+    }
+
+    private static func boundingBox(for center: CLLocationCoordinate2D, radiusMeters: Double) -> (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double) {
+        let earthRadius = 6_371_000.0
+        let deltaLat = (radiusMeters / earthRadius) * (180.0 / .pi)
+        let deltaLon = (radiusMeters / (earthRadius * cos(center.latitude * .pi / 180.0))) * (180.0 / .pi)
+        return (center.latitude - deltaLat, center.latitude + deltaLat, center.longitude - deltaLon, center.longitude + deltaLon)
+    }
+
+    private static func haversineDistanceMeters(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) -> Double {
+        let earthRadius = 6_371_000.0
+        let dLat = (to.latitude - from.latitude) * .pi / 180
+        let dLon = (to.longitude - from.longitude) * .pi / 180
+        let a = sin(dLat / 2) * sin(dLat / 2) +
+            cos(from.latitude * .pi / 180) * cos(to.latitude * .pi / 180) *
+            sin(dLon / 2) * sin(dLon / 2)
+        let c = 2 * atan2(sqrt(a), sqrt(1 - a))
+        return earthRadius * c
+    }
+
+    /// Fetch all scenes with an optional owner filter (used as a fallback when no location).
+    static func fetchAllSceneMeta(limit: Int = 10, onlyCurrentUser: Bool = false, completion: @escaping (Result<[CloudSceneMeta], Error>) -> Void) {
+        var query: Query = db.collection("scenes")
+            .order(by: "updatedAt", descending: true)
+            .limit(to: limit)
+
+        if onlyCurrentUser, let uid = Auth.auth().currentUser?.uid {
+            query = query.whereField("ownerUid", isEqualTo: uid)
+        }
+
+        query.getDocuments { snap, err in
+            if let err = err { return completion(.failure(err)) }
+
+            let metas: [CloudSceneMeta] = snap?.documents.compactMap { doc in
+                let data = doc.data()
+                let name = data["name"] as? String ?? "Untitled"
+                let storagePath = data["storagePath"] as? String ?? ""
+                let ts = (data["updatedAt"] as? Timestamp)?.dateValue() ?? Date()
+                let bytes = data["bytes"] as? Int ?? 0
+                let lat = data["lat"] as? Double
+                let lon = data["lon"] as? Double
+                let alt = data["alt"] as? Double
+                let hAcc = data["hAcc"] as? Double
+                let heading = data["heading"] as? Double
+
+                return CloudSceneMeta(id: doc.documentID,
+                                      name: name,
+                                      storagePath: storagePath,
+                                      updatedAt: ts,
+                                      bytes: bytes,
+                                      latitude: lat,
+                                      longitude: lon,
+                                      altitude: alt,
+                                      horizontalAccuracy: hAcc,
+                                      heading: heading,
+                                      distanceFromQueryMeters: nil)
+            } ?? []
+
+            completion(.success(metas))
+        }
     }
 }
