@@ -33,16 +33,20 @@ struct FriendsListSheet: View {
     @State private var friendRows: [FriendUser] = []
     @State private var suggestions: [FriendUser] = []
 
+    // Link state (from listenAllLinkPartners)
+    @State private var pendingUIDs: Set<String> = []
+
     // Listeners
     @State private var listenerFriends: ListenerRegistration?
     @State private var listenerIncoming: ListenerRegistration?
+    @State private var listenerAllLinks: ListenerRegistration?   // <— add this
 
     private var myUid: String? { session.user?.uid }
 
     var body: some View {
         NavigationStack {
             List {
-                // One search bar
+                // 1) Search bar
                 Section {
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass").foregroundColor(.secondary)
@@ -52,14 +56,17 @@ struct FriendsListSheet: View {
                     }
                 }
 
-                // Friend requests section (Facebook-style)
+                // 2) Friend requests (if any)
                 if !incoming.isEmpty {
                     Section {
                         headerRow(
                             title: "Friend requests",
-                            badge: incoming.count,
-                            trailing: Text("See All").font(.subheadline).foregroundColor(.blue)
-                        )
+                            badge: incoming.count
+                        ) {
+                            Text("See All")
+                                .font(.subheadline)
+                                .foregroundColor(.blue)
+                        }
 
                         ForEach(incoming) { r in
                             facebookRow(
@@ -75,48 +82,115 @@ struct FriendsListSheet: View {
                     }
                 }
 
-                // Friends (sorted, filtered)
+                // 3) Friends + People, depending on search
+                let q = search.trimmingCharacters(in: .whitespacesAndNewlines)
                 let filteredFriends = filteredFriendsList()
-                Section {
-                    headerRow(
-                        title: "Your friends",
-                        badge: max(friendRows.count, friends.count), // <- badge fallback
-                        trailing: EmptyView()
-                    )
 
-                    // If Firestore hasn't delivered yet, fall back to the usernames passed in
-                    let rowsToShow: [FriendUser] =
-                        !friendRows.isEmpty
-                        ? filteredFriends
-                        : friends
-                            .map { FriendUser(id: $0, username: $0) } // temp display only
-                            .sorted { $0.username.lowercased() < $1.username.lowercased() }
-                            .filter { search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                      || $0.username.lowercased().contains(search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) }
+                if q.isEmpty {
+                    // === DEFAULT: show ALL friends A–Z ===
+                    Section {
+                        let rowsToShow: [FriendUser] =
+                            !friendRows.isEmpty
+                            ? filteredFriends
+                            : friends
+                              .map { FriendUser(id: $0, username: $0) } // fallback until Firestore resolves
+                              .sorted { $0.username.lowercased() < $1.username.lowercased() }
 
-                    if rowsToShow.isEmpty {
-                        Text(search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                             ? "You have no friends yet."
-                             : "No friends match “\(search.trimmingCharacters(in: .whitespacesAndNewlines))”.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 4)
-                    } else {
-                        ForEach(rowsToShow) { u in
-                            facebookRow(
-                                title: u.username,
-                                subtitle: nil,
-                                avatarURL: nil,
-                                primaryTitle: "Message",
-                                secondaryTitle: "Remove",
-                                onPrimary: {},
-                                onSecondary: {}
-                            )
+                        if rowsToShow.isEmpty {
+                            Text("You have no friends yet.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 4)
+                        } else {
+                            ForEach(rowsToShow) { u in
+                                facebookRow(
+                                    title: u.username,
+                                    subtitle: nil,
+                                    avatarURL: nil, // hook up profilePictureURL later if you want
+                                    primaryTitle: "Message",
+                                    secondaryTitle: "Remove",
+                                    onPrimary: {},
+                                    onSecondary: {}
+                                )
+                            }
                         }
+                    } header: {
+                        headerRow(
+                            title: "Your friends",
+                            badge: max(friendRows.count, friends.count)
+                        ) { EmptyView() }
+                    }
+
+                } else {
+                    // === SEARCH MODE ===
+
+                    // 3a) Friends that match
+                    Section {
+                        if filteredFriends.isEmpty {
+                            Text("No friends match “\(q)”.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 4)
+                        } else {
+                            ForEach(filteredFriends) { u in
+                                facebookRow(
+                                    title: u.username,
+                                    subtitle: nil,
+                                    avatarURL: nil,
+                                    primaryTitle: "Message",
+                                    secondaryTitle: "Remove",
+                                    onPrimary: {},
+                                    onSecondary: {}
+                                )
+                            }
+                        }
+                    } header: {
+                        headerRow(
+                            title: "Friends",
+                            badge: filteredFriends.count
+                        ) { EmptyView() }
+                    }
+
+                    // 3b) People (non-friends & not pending) — uses `suggestions` filled by runSearch(prefix:)
+                    Section {
+                        if suggestions.isEmpty {
+                            Text("No people found.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 4)
+                        } else {
+                            ForEach(suggestions) { u in
+                                let isPending = pendingUIDs.contains(u.id)
+
+                                facebookRow(
+                                    title: u.username,
+                                    subtitle: nil,
+                                    avatarURL: nil,
+                                    primaryTitle: isPending ? "Sent" : "Add",
+                                    secondaryTitle: isPending ? "Unsend" : "Hide",
+                                    onPrimary: {
+                                        if !isPending {
+                                            add(username: u.username)
+                                        }
+                                    },
+                                    onSecondary: {
+                                        if isPending {
+                                            unsend(userId: u.id)
+                                        } else {
+                                            // Optional: hide from local suggestions
+                                            // suggestions.removeAll { $0.id == u.id }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    } header: {
+                        headerRow(
+                            title: "People",
+                            badge: suggestions.count
+                        ) { EmptyView() }
                     }
                 }
-
-
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Friends")
@@ -126,10 +200,12 @@ struct FriendsListSheet: View {
                 }
             }
         }
+
         .onAppear(perform: startListening)
         .onDisappear {
             listenerFriends?.remove()
             listenerIncoming?.remove()
+            listenerAllLinks?.remove()
         }
         .onChange(of: search) { _, _ in debounceSearch() }
     }
@@ -137,14 +213,18 @@ struct FriendsListSheet: View {
     // MARK: - Header + Facebook row components
 
     @ViewBuilder
-    private func headerRow(title: String, badge: Int, trailing: some View) -> some View {
+    private func headerRow<Trailing: View>(
+        title: String,
+        badge: Int,
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
         HStack {
             HStack(spacing: 6) {
                 Text(title).font(.headline.weight(.semibold))
                 Text("\(badge)").font(.headline.weight(.semibold)).foregroundStyle(.red)
             }
             Spacer()
-            trailing
+            trailing()
         }
         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
     }
@@ -199,6 +279,19 @@ struct FriendsListSheet: View {
             }
         }
     }
+    private func startAllLinksListener() {
+        do {
+            listenerAllLinks = try friendsService.listenAllLinkPartners { partners, pending, accepted in
+                // We only need pending UIDs for "Sent/Unsend"
+                Task { @MainActor in
+                    self.pendingUIDs = pending
+                }
+            }
+        } catch {
+            print("⚠️ listenAllLinkPartners failed:", error)
+        }
+    }
+
 
     // MARK: - Data
     private func startListening() {
@@ -248,12 +341,15 @@ struct FriendsListSheet: View {
         } catch {
             print("🔥 listenIncomingRequests failed to start:", error)
         }
+        
+        startAllLinksListener()
     }
 
     private func filteredFriendsList() -> [FriendUser] {
         let q = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return friendRows }
-        return friendRows.filter { $0.username.lowercased().contains(q) }
+        let base = friendRows.sorted { $0.username.lowercased() < $1.username.lowercased() }
+        guard !q.isEmpty else { return base }
+        return base.filter { $0.username.lowercased().contains(q) }
     }
 
     // Debounced global search (People)
@@ -299,6 +395,16 @@ struct FriendsListSheet: View {
         Task {
             do { try await friendsService.declineRequest(from: requesterUid) }
             catch { print("decline error:", error) }
+        }
+    }
+    
+    private func unsend(userId: String) {
+        Task {
+            do {
+                try await friendsService.removeLink(with: userId)
+            } catch {
+                print("unsend error:", error)
+            }
         }
     }
 }
