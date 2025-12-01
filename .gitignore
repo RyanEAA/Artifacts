@@ -4,3 +4,5 @@ GoogleService-Info.plist
 serviceAccountKey.json
 *.plist
 GoogleService-Info.plist
+Artifacts/GoogleService-Info.plist
+GoogleService-Info.plist
