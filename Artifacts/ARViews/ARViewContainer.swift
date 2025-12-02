@@ -62,6 +62,8 @@ struct ARViewContainer: UIViewRepresentable {
         self.sceneManager.artifactIdToAnchorId.removeAll()
         // Always start in auto-match mode; never autoload a prior scene.
         self.sceneManager.shouldAttemptSceneAutoMatch = true
+        self.sceneManager.hasResolvedInitialScene = false
+        self.sceneManager.showInitialScanPrompt = true
         self.sceneManager.bindLocationProvider(self.locationProvider)
         
         // Artifacts will begin syncing once the session relocalizes to the scene
@@ -619,6 +621,8 @@ class SceneManager: ObservableObject {
     @Published var isPersistenceAvailable: Bool = false
     @Published var anchorEntities: [AnchorEntity] = []
     @Published var showInitialScanPrompt: Bool = true
+    // Tracks whether we've matched to an existing scene or created a new one for this session
+    var hasResolvedInitialScene: Bool = false
     
     var shouldSaveSceneToFilesystem: Bool = false
     var shouldLoadSceneToFilesystem: Bool = false
@@ -655,6 +659,7 @@ class SceneManager: ObservableObject {
     var autoMatchAttemptInProgress: Bool = false
     var autoMatchTimer: Timer?
     var autoMatchCurrentSceneIdCandidate: String?
+    var autoMatchFallbackRetries: Int = 0
 
     // Auto-load state for last scene on cold start
     var shouldAutoloadLastScene: Bool = false
@@ -752,7 +757,10 @@ extension ARViewContainer {
     
     private func handlePersistence(for arView: CustomARView) {
         let mappingStatus = arView.session.currentFrame?.worldMappingStatus ?? .notAvailable
-        self.sceneManager.showInitialScanPrompt = !(mappingStatus == .extending || mappingStatus == .mapped)
+        let shouldShowInitialScanPrompt = !self.sceneManager.hasResolvedInitialScene
+        if self.sceneManager.showInitialScanPrompt != shouldShowInitialScanPrompt {
+            self.sceneManager.showInitialScanPrompt = shouldShowInitialScanPrompt
+        }
 
         if !self.sceneManager.hasSeenMapping && (mappingStatus == .extending || mappingStatus == .mapped) {
             self.sceneManager.hasSeenMapping = true
@@ -815,6 +823,7 @@ extension ARViewContainer {
         if self.sceneManager.shouldLoadSceneFromCloud {
             print("☁️ Attempting to load scene from cloud...")
             self.sceneManager.shouldLoadSceneFromCloud = false
+            self.sceneManager.hasResolvedInitialScene = false
             self.modelsViewModel.clearModelEntityFromMemory()
             self.sceneManager.anchorEntities.removeAll(keepingCapacity: true)
             self.sceneManager.hasStartedArtifactSync = false
@@ -908,10 +917,12 @@ extension ARViewContainer {
     // MARK: - Scene Auto-Match (attempt relocalization against user's saved scenes)
 
     private func startSceneAutoMatch(on arView: CustomARView) {
+        sceneManager.hasResolvedInitialScene = false
         sceneManager.autoMatchAttemptInProgress = true
         sceneManager.hasRelocalizedForArtifacts = false
         sceneManager.hasLoadedWorldMap = false
         sceneManager.isRelocalizingToLoadedScene = false
+        sceneManager.autoMatchFallbackRetries = 0
         let searchRadius = sceneManager.autoMatchSearchRadiusMeters
         guard let location = sceneManager.lastKnownLocation else {
             print("ℹ️ Auto-match skipped: no location available yet; starting a new scene.")
@@ -975,6 +986,7 @@ extension ARViewContainer {
         sceneManager.hasLoadedWorldMap = false
         sceneManager.pendingSceneIdForArtifacts = meta.id
         sceneManager.autoMatchCurrentSceneIdCandidate = meta.id
+        sceneManager.autoMatchFallbackRetries = 0
         // Clear 2D overlays
         for (_, view) in sceneManager.annotationViews { view.removeFromSuperview() }
         for (_, btn) in sceneManager.deleteButtons { btn.removeFromSuperview() }
@@ -992,22 +1004,32 @@ extension ARViewContainer {
                     self.sceneManager.hasLoadedWorldMap = true
                     self.sceneManager.isRelocalizingToLoadedScene = true
                     ScenePersistenceHelper.loadScene(for: arView, with: data)
-                    // If we don't relocalize to this map within the window, try the next one
-                    self.sceneManager.autoMatchTimer?.invalidate()
-                    self.sceneManager.autoMatchTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { _ in
-                        if !self.sceneManager.hasRelocalizedForArtifacts {
-                            self.tryNextSceneAutoMatch(on: arView)
-                        } else {
-                            // Success; stop timer chain
-                            self.sceneManager.autoMatchAttemptInProgress = false
-                            self.sceneManager.shouldAttemptSceneAutoMatch = false
-                        }
-                    }
+                    // Give ARKit more time to integrate; only skip when tracking is stable but still not relocalized.
+                    self.scheduleAutoMatchFallback(on: arView, delay: 10.0)
                 case .failure(let error):
                     print("❌ Failed to load scene \(meta.id) for auto-match:", error.localizedDescription)
                     self.tryNextSceneAutoMatch(on: arView)
                 }
             }
+        }
+    }
+
+    private func scheduleAutoMatchFallback(on arView: CustomARView, delay: TimeInterval) {
+        sceneManager.autoMatchTimer?.invalidate()
+        sceneManager.autoMatchTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { _ in
+            guard !self.sceneManager.hasRelocalizedForArtifacts else { return }
+
+            let mappingStatus = arView.session.currentFrame?.worldMappingStatus ?? .notAvailable
+            // If tracking hasn't stabilized yet, give this candidate more time before skipping.
+            if (mappingStatus == .notAvailable || mappingStatus == .limited),
+               self.sceneManager.autoMatchFallbackRetries < 2 {
+                self.sceneManager.autoMatchFallbackRetries += 1
+                print("⏳ Auto-match: mappingStatus=\(mappingStatus.rawValue); waiting longer before skipping candidate.")
+                self.scheduleAutoMatchFallback(on: arView, delay: 5.0)
+                return
+            }
+
+            self.tryNextSceneAutoMatch(on: arView)
         }
     }
 
@@ -1020,6 +1042,8 @@ extension ARViewContainer {
         self.sceneManager.hasLoadedWorldMap = false
         self.sceneManager.isRelocalizingToLoadedScene = false
         self.sceneManager.shouldAttemptSceneAutoMatch = false
+        self.sceneManager.hasResolvedInitialScene = true
+        self.sceneManager.autoMatchFallbackRetries = 0
         // Persist a world map for this new scene once mapping is ready
         self.sceneManager.shouldSaveSceneToCloud = true
         print("🆕 Created new scene:", newSceneId)
@@ -1101,6 +1125,7 @@ extension ARViewContainer {
 
             if readyForArtifacts {
                 parent.sceneManager.hasRelocalizedForArtifacts = true
+                parent.sceneManager.hasResolvedInitialScene = true
                 parent.sceneManager.autoMatchTimer?.invalidate()
                 parent.sceneManager.autoMatchTimer = nil
                 parent.sceneManager.autoMatchAttemptInProgress = false
