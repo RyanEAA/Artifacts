@@ -1,5 +1,5 @@
 
-# 🧩 Artifacts — Social Augmented Reality App
+# Artifacts — Social Augmented Reality App
 
 Artifacts is a SwiftUI + ARKit application that allows users to place, view, and share persistent digital objects (“artifacts”) in real-world locations. The app combines AR scene persistence, social connections, and cloud-backed storage using Firebase.
 
@@ -7,17 +7,23 @@ This repository documents both the **implementation** and the **system architect
 
 ---
 
-## ✨ Core Features
+## Core Features
 
 - Place and view 3D AR artifacts using ARKit & RealityKit
 - Persistent AR scenes using ARWorldMap
 - Social graph with friend requests and shared visibility
 - Cloud-backed 3D model catalog
 - Firebase Authentication, Firestore, and Storage integration
+- Uses ARWorldTrackingConfiguration.isCollaborationEnabled = true
+- ARKit automatically generates and consumes ARSession.CollaborationData
+- Synchronizes:
+  - World mapping
+  - Anchors
+  - Coordinate alignment
 
 ---
 
-## 🏗️ High-Level Architecture
+## High-Level Architecture
 
 Artifacts follows a **SwiftUI + MVVM** architecture with explicit AR session management.
 
@@ -43,7 +49,7 @@ Artifacts follows a **SwiftUI + MVVM** architecture with explicit AR session man
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 
@@ -75,7 +81,7 @@ Artifacts/
 
 ---
 
-## 🧠 File & Component Responsibilities
+## File & Component Responsibilities
 
 ### App Entry & Navigation
 
@@ -144,6 +150,70 @@ ViewModels are the **source of truth**.
 
 ---
 
+### MultipeerConnectivity (Peer-To-Peer Transport)
+- Handles peer discovery and networking
+- Sends collaboration packets between nearby devices
+- No central server required
+- Low latency and ideal for demos
+- Used only as a transport layer — it does not interpret AR data.
+#### CollaborationManager
+- Bridges ARKit and MultipeerConnectivity
+- Responsibilities:
+  - Send outgoing collaboration data
+  - Receive incoming collaboration data
+  -   Apply updates to the ARSession
+
+#### Collaboration Data Flow
+```mermaid
+flowchart LR
+    A[User A ARSession]
+    B[User B ARSession]
+
+    A -->|CollaborationData| MP[MultipeerConnectivity]
+    MP -->|CollaborationData| B
+
+    B -->|CollaborationData| MP
+    MP -->|CollaborationData| A
+```
+
+### Session Lifecycle
+```mermaid
+sequenceDiagram
+    participant Host
+    participant Peer
+
+    Host->>Host: Enable Collaboration
+    Host->>Host: Start Hosting Session
+
+    Peer->>Peer: Enable Collaboration
+    Peer->>Peer: Start Browsing
+
+    Peer->>Host: Invitation
+    Host->>Peer: Accept
+
+    Host-->>Peer: AR Collaboration Data
+    Peer-->>Host: AR Collaboration Data
+
+    Host->>Host: Place / Move / Delete Object
+    Peer->>Peer: Sees Changes in Real Time
+```
+#### CollaborationManager.swift
+
+- Serializes and deserializes ARSession.CollaborationData
+
+- Interfaces with MultipeerSession
+
+#### MultipeerSession.swift
+
+- Handles peer discovery
+
+- Manages peer connections
+
+- Sends raw Data between peers
+
+---
+
+
 ### Utilities
 
 #### `FirebaseStorageHelper.swift`
@@ -155,7 +225,7 @@ ViewModels are the **source of truth**.
 
 ---
 
-## 🔐 Firebase Architecture
+## Firebase Architecture
 
 ### Authentication
 - Firebase Auth is required for nearly all reads/writes
@@ -219,7 +289,7 @@ flowchart LR
 
 ---
 
-## 🔁 Core Call Flows
+## Core Call Flows
 
 ### Load 3D Model Catalog
 
@@ -257,7 +327,7 @@ sequenceDiagram
 
 ---
 
-## 🔒 Security Model (Summary)
+## Security Model (Summary)
 
 * **Models & thumbnails:** read-only for authenticated users
 * **Scenes:** readable by owner or friends; write only by owner
