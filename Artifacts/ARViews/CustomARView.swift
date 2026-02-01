@@ -18,6 +18,7 @@ class CustomARView: ARView{
     
     var defaultCofiguration: ARWorldTrackingConfiguration {
         let config = ARWorldTrackingConfiguration()
+        config.isCollaborationEnabled = sessionSettings.isCollaborationEnabled
         config.planeDetection = [.horizontal, .vertical]
         
         if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
@@ -31,7 +32,7 @@ class CustomARView: ARView{
     private var peopleOcclusionCancellable: AnyCancellable?
     private var objectOcclusionCancellable: AnyCancellable?
     private var lidarDebugCancellable: AnyCancellable?
-    private var multiuserCancellable: AnyCancellable?
+    private var collaborationCancellable: AnyCancellable?
 
     
     required init(frame frameRect: CGRect, sessionSettings: SessionSettings, modelDeletionManager: ModelDeletionManager) {
@@ -68,7 +69,7 @@ class CustomARView: ARView{
         self.updatePeopleOcclusion(isEnabled: sessionSettings.isPeopleOcclusionEnabled)
         self.updateObjectOcclusion(isEnabled: sessionSettings.isObjectOcclusionEnabled)
         self.updateLidarDebug(isEnabled: sessionSettings.isLidarDebugEnabled)
-        self.updateMultiuser(isEnabled: sessionSettings.isMultiuserEnabled)
+        self.updateCollaboration(isEnabled: sessionSettings.isCollaborationEnabled)
 
     }
     
@@ -88,53 +89,53 @@ class CustomARView: ARView{
             self?.updateLidarDebug(isEnabled: isEnabled)
         }
         
-        self.multiuserCancellable = sessionSettings.$isMultiuserEnabled.sink { [weak self]
+        self.collaborationCancellable = sessionSettings.$isCollaborationEnabled.sink { [weak self]
             isEnabled in
-            self?.updateMultiuser(isEnabled: isEnabled)
+            self?.updateCollaboration(isEnabled: isEnabled)
         }
     }
     
     private func updatePeopleOcclusion(isEnabled: Bool) {
         print("\(#file): isPeopleOcclusionEnabled: \(isEnabled)")
-        guard ARWorldTrackingConfiguration.supportsFrameSemantics(.personSegmentationWithDepth) else {
-            return
-        }
-        
-        guard let configuration = self.session.configuration as? ARWorldTrackingConfiguration else {
-            return
-        }
-        
-        if configuration.frameSemantics.contains(.personSegmentationWithDepth) {
-            configuration.frameSemantics.remove(.personSegmentationWithDepth)
-        } else {
+        guard ARWorldTrackingConfiguration.supportsFrameSemantics(.personSegmentationWithDepth) else { return }
+        guard let configuration = self.session.configuration as? ARWorldTrackingConfiguration else { return }
+
+        if isEnabled {
             configuration.frameSemantics.insert(.personSegmentationWithDepth)
+        } else {
+            configuration.frameSemantics.remove(.personSegmentationWithDepth)
         }
-        
-        self.session.run(configuration)
+
+        self.session.run(configuration, options: [])
     }
     
     private func updateObjectOcclusion(isEnabled: Bool) {
         print("\(#file): updateObjectOcclusion: \(isEnabled)")
-        
-        if self.environment.sceneUnderstanding.options.contains(.occlusion) {
-            self.environment.sceneUnderstanding.options.remove(.occlusion)
-        } else {
+        if isEnabled {
             self.environment.sceneUnderstanding.options.insert(.occlusion)
+        } else {
+            self.environment.sceneUnderstanding.options.remove(.occlusion)
         }
     }
     
     private func updateLidarDebug(isEnabled: Bool) {
         print("\(#file): updateLidarDebug: \(isEnabled)")
-        
-        if self.debugOptions.contains(.showSceneUnderstanding) {
-            self.debugOptions.remove(.showSceneUnderstanding)
-        } else {
+        if isEnabled {
             self.debugOptions.insert(.showSceneUnderstanding)
+        } else {
+            self.debugOptions.remove(.showSceneUnderstanding)
         }
     }
     
-    private func updateMultiuser(isEnabled: Bool) {
-        print("\(#file): updateMultiuser: \(isEnabled)")
+    private func updateCollaboration(isEnabled: Bool) {
+        print("\(#file): updateCollaboration: \(isEnabled)")
+        
+        guard let configuration = self.session.configuration as? ARWorldTrackingConfiguration else { return }
+
+        configuration.isCollaborationEnabled = isEnabled
+
+        // Changing collaboration should re-run configuration but NOT reset tracking unless needed
+        self.session.run(configuration, options: [])
     }
 }
 

@@ -297,11 +297,12 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = QZQ4U5K473;
+				DEVELOPMENT_TEAM = DN6NVTU2LU;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Artifacts/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "This app uses the camera to display Augmented Reality objects";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Artifacts uses local network to share AR sessions with nearby friends.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app uses your location to show your current position on the map.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -314,7 +315,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = Artifacts.Artifacts;
+				PRODUCT_BUNDLE_IDENTIFIER = Artifacts.Escobar;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -327,13 +328,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = QZQ4U5K473;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Artifacts/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "This app uses the camera to display Augmented Reality objects";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Artifacts uses local network to share AR sessions with nearby friends.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app uses your location to show your current position on the map.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -346,8 +348,9 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = Artifacts.Artifacts;
+				PRODUCT_BUNDLE_IDENTIFIER = Artifacts.Escobar;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";

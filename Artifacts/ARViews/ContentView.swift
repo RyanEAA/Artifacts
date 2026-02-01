@@ -13,6 +13,7 @@ struct ContentView: View {
     @EnvironmentObject var modelsViewModel: ModelsViewModel
     @EnvironmentObject var modelDeletionManager: ModelDeletionManager
     
+    
     @State private var selectedControlMode: Int = 0
     @State private var isControlsVisible: Bool = true
     @State private var showBrowse: Bool = false

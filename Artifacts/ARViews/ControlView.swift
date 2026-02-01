@@ -90,6 +90,7 @@ struct SceneButtons: View {
                     if let meta {
                         DispatchQueue.main.async {
                             self.sceneManager.selectedCloudSceneId = meta.id
+                            print("Attemping to load scene with id: \(meta.id)")
                             self.sceneManager.shouldLoadSceneFromCloud = true  // ARViewContainer will do the actual load
                         }
                     } else {

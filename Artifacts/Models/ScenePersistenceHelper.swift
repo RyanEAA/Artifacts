@@ -26,28 +26,6 @@ class ScenePersistenceHelper {
             }
         }
     }
-//    class func saveScene(for arView: CustomARView, at persistenceUrl: URL) {
-//        print("Save Scene to local filesystem")
-//        
-//        // 1. get current worldMap from arView.session
-//        arView.session.getCurrentWorldMap { worldMap, error in
-//            
-//            // 2. safely wrap worldMap
-//            guard let map = worldMap else {
-//                print("Persistence Error: Unable to get worldMap: \(error!.localizedDescription)")
-//                return
-//            }
-//            
-//            // 3. archive data and write to filesystem
-//            do {
-//                let sceneData = try NSKeyedArchiver.archivedData(withRootObject: map, requiringSecureCoding: true)
-//                
-//                try sceneData.write(to: persistenceUrl, options: [.atomic])
-//            } catch {
-//                print("Persistence Error: Can't save scene to local filesystem: \(error.localizedDescription)")
-//            }
-//        }
-//    }
     
     class func loadScene(for arView: CustomARView, with scenePersistenceData: Data) {
         print("Load Scene from local filesystem")

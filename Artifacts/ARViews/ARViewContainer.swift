@@ -24,6 +24,7 @@ struct ARViewContainer: UIViewRepresentable {
     @EnvironmentObject var sceneManager: SceneManager
     @EnvironmentObject var modelsViewModel: ModelsViewModel
     @EnvironmentObject var modelDeletionManager: ModelDeletionManager
+    @EnvironmentObject var collaborationManager: CollaborationManager
     
     func makeUIView(context: Context) -> CustomARView {
         let arView = CustomARView(frame: .zero,
@@ -48,6 +49,7 @@ struct ARViewContainer: UIViewRepresentable {
             self.updatePersistenceAvailability(for: arView)
             self.handlePersistence(for: arView)
         })
+        collaborationManager.session = arView.session
         
         return arView
     }
@@ -389,6 +391,10 @@ extension ARViewContainer {
         
         init(_ parent: ARViewContainer) {
             self.parent = parent
+        }
+        func session(_ session: ARSession, didOutputCollaborationData data: ARSession.CollaborationData) {
+            // Only send when collaboration is enabled (optional safety)
+            parent.collaborationManager.sendCollaborationData(data)
         }
         
         // We can’t capture id via UIButton target/action directly; we register it here.

@@ -11,7 +11,7 @@ enum Setting {
     case peopleOcclusion
     case objectOcclusion
     case lidarDebug
-    case multiuser
+    case collaboration
     
     var label: String {
         get {
@@ -20,8 +20,8 @@ enum Setting {
                 return "Occlusion"
             case .lidarDebug:
                 return "LiDar"
-            case .multiuser:
-                return "Multiuser"
+            case .collaboration:
+                return "Collaboration"
             }
         }
     }
@@ -35,7 +35,7 @@ enum Setting {
                 return "cube.box.fill"
             case .lidarDebug:
                 return "light.min"
-            case .multiuser:
+            case .collaboration:
                 return "person.2"
             }
 
@@ -62,23 +62,76 @@ struct SettingsView: View {
 
 struct SettingsGrid: View {
     @EnvironmentObject var sessionSettings: SessionSettings
-    
+    @EnvironmentObject var collaborationManager: CollaborationManager
+
     private var gridItemLayout = [GridItem(.adaptive(minimum: 100, maximum: 100), spacing: 25)]
-    
+
     var body: some View {
         ScrollView {
-            LazyVGrid (columns: gridItemLayout, spacing: 25) {
-                SettingToggleButton(setting: .peopleOcclusion, isOn: $sessionSettings.isPeopleOcclusionEnabled)
-                
-                SettingToggleButton(setting: .objectOcclusion, isOn: $sessionSettings.isObjectOcclusionEnabled)
+            VStack(spacing: 24) {
+                LazyVGrid(columns: gridItemLayout, spacing: 25) {
+                    SettingToggleButton(setting: .peopleOcclusion, isOn: $sessionSettings.isPeopleOcclusionEnabled)
+                    SettingToggleButton(setting: .objectOcclusion, isOn: $sessionSettings.isObjectOcclusionEnabled)
+                    SettingToggleButton(setting: .lidarDebug, isOn: $sessionSettings.isLidarDebugEnabled)
+                    SettingToggleButton(setting: .collaboration, isOn: $sessionSettings.isCollaborationEnabled)
+                }
 
-                SettingToggleButton(setting: .lidarDebug, isOn: $sessionSettings.isLidarDebugEnabled)
+                collaborationSection
+            }
+            .padding(.top, 35)
+        }
+    }
 
-                SettingToggleButton(setting: .multiuser, isOn: $sessionSettings.isMultiuserEnabled)
+    private var collaborationSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Collaboration Session")
+                .font(.headline)
+                .padding(.horizontal)
+
+            HStack(spacing: 12) {
+                Button {
+                    // Ensure ARKit collaboration flag is ON
+                    sessionSettings.isCollaborationEnabled = true
+                    collaborationManager.host()
+                } label: {
+                    Label("Host", systemImage: "antenna.radiowaves.left.and.right")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button {
+                    sessionSettings.isCollaborationEnabled = true
+                    collaborationManager.join()
+                } label: {
+                    Label("Join", systemImage: "person.2.wave.2")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
 
             }
+
+            Button(role: .destructive) {
+                collaborationManager.stop()
+            } label: {
+                Label("Stop", systemImage: "xmark.circle")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+
+            // Optional: show connected peer count
+            if !collaborationManager.multipeer.connectedPeers.isEmpty {
+                Text("Connected: \(collaborationManager.multipeer.connectedPeers.count)")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal)
+            } else {
+                Text("Connected: 0")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal)
+            }
         }
-        .padding(.top, 35)
+        .padding(.bottom, 20)
     }
 }
 
