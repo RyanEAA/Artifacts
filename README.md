@@ -32,15 +32,15 @@ Artifacts follows a **SwiftUI + MVVM** architecture with explicit AR session man
 ┌──────────────────────────┐
 │        SwiftUI Views     │  ← UI & user interaction
 └────────────▲─────────────┘
-│
+             │
 ┌────────────┴─────────────┐
 │        ViewModels        │  ← App state & logic
 └────────────▲─────────────┘
-│
+             │
 ┌────────────┴─────────────┐
 │   AR / Scene Management  │  ← RealityKit & persistence
 └────────────▲─────────────┘
-│
+             │
 ┌────────────┴─────────────┐
 │ Firebase (Auth/DB/Store) │  ← Cloud persistence & security
 └──────────────────────────┘
