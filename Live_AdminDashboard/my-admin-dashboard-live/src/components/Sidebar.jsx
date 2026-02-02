@@ -10,9 +10,9 @@ export default function Sidebar() {
         <Link to="/dashboard/users" className="block px-3 py-2 rounded hover:bg-white/20">
           Users
         </Link>
-        {/* <Link to="/dashboard/artifacts" className="block px-3 py-2 rounded hover:bg-white/20">
+        <Link to="/dashboard/artifacts" className="block px-3 py-2 rounded hover:bg-white/20">
           Artifacts
-        </Link> */}  {/* Removed link to Artifacts page */}
+        </Link>
       </nav>
     </aside>
   );

@@ -2,7 +2,7 @@ import { Routes, Route } from "react-router-dom";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Users from "./pages/Users";
-// import Artifacts from "./pages/Artifacts";
+import Artifacts from "./pages/Artifacts";
 import Unauthorized from "./pages/Unauthorized";
 import ProtectedRoute from "./routes/ProtectedRoute";
 
@@ -33,7 +33,7 @@ export default function App() {
       />
 
       {/* Future admin-only routes */}
-      {/*
+      
       <Route
         path="/dashboard/artifacts"
         element={
@@ -42,7 +42,7 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-      */}
+     
 
       {/* Unauthorized */}
       <Route path="/unauthorized" element={<Unauthorized />} />

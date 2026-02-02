@@ -4,9 +4,9 @@ import { Link } from "react-router-dom";
 
 export default function Dashboard() {
   const { data: users } = useFirestore("users");
-  // const { data: artifacts } = useFirestore("artifacts");
+  const { data: artifacts } = useFirestore("artifacts");
 
-  // const annotations = artifacts.filter(a => a.type === "annotation"); not in current use
+  const annotations = artifacts.filter(a => a.type === "annotation");
 
   return (
     <AdminLayout>
@@ -14,7 +14,7 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Artifacts with Annotations */}
-        {/* <section className="bg-surface border border-border rounded-lg p-6">
+        <section className="bg-surface border border-border rounded-lg p-6">
           <h2 className="flex items-center text-xl font-semibold mb-4 text-textPrimary">
             Artifacts with Annotations
             <Link
@@ -40,7 +40,7 @@ export default function Dashboard() {
               ))}
             </ul>
           )}
-        </section> */}
+        </section>
 
         {/* Users list */}
         <section className="bg-surface border border-border rounded-lg p-6">

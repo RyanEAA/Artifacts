@@ -21,9 +21,9 @@ export default function Login() {
   };
 
   return (
-        <div className="flex justify-center items-center min-h-screen bg-gray-100">
-      <form onSubmit={handleSubmit} className="bg-white p-8 rounded shadow w-96">
-        <h2 className="text-2xl mb-4">Admin Login</h2>
+        <div className="flex justify-center items-center min-h-screen bg-background">
+      <form onSubmit={handleSubmit} className="bg-surface p-8 rounded shadow w-96">
+        <h2 className="text-white text-2xl mb-4">Admin Login</h2>
         {error && <p className="text-red-500 mb-2">{error}</p>}
         <input
           type="email"
