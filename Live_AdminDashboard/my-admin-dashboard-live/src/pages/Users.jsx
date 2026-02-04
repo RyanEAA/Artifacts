@@ -21,18 +21,51 @@ export default function Users() {
     setNewUsername("");
   };
 
+  // const saveChanges = async () => {
+  //   try {
+  //     await updateDoc(doc(db, "users", editingId), {
+  //       username: newUsername,
+  //     });
+  //     closeEditor();
+  //     alert("Username updated!");
+  //   } catch (err) {
+  //     console.error("Update failed:", err);
+  //     alert("Failed to update username.");
+  //   }
+  // };
   const saveChanges = async () => {
-    try {
-      await updateDoc(doc(db, "users", editingId), {
-        username: newUsername,
-      });
-      closeEditor();
-      alert("Username updated!");
-    } catch (err) {
-      console.error("Update failed:", err);
-      alert("Failed to update username.");
+  try {
+    const trimmedUsername = newUsername.trim();
+
+    if (!trimmedUsername) {
+      alert("Username cannot be empty.");
+      return;
     }
-  };
+
+    // Check if username already exists (excluding current user)
+    const usernameTaken = users.some(
+      (u) =>
+        u.username.toLowerCase() === trimmedUsername.toLowerCase() &&
+        u.id !== editingId
+    );
+
+    if (usernameTaken) {
+      alert("That username is already in use.");
+      return;
+    }
+
+    await updateDoc(doc(db, "users", editingId), {
+      username: trimmedUsername,
+    });
+
+    closeEditor();
+    alert("Username updated!");
+  } catch (err) {
+    console.error("Update failed:", err);
+    alert("Failed to update username.");
+  }
+};
+
 
   const deleteUser = async (id) => {
     if (!confirm("Are you sure you want to delete this user?")) return;
