@@ -17,29 +17,21 @@ struct HomeARView: View {
             VStack(spacing: 16) {
                 // Options appear above when plus is active
                 if showOptions {
-                    VStack(spacing: 12) {
-                        Button {
+                    VStack(spacing: 10) {
+                        optionRow(icon: "textformat", title: "Place Textbox") {
                             placingMode = .text
-                            showOptions = !showOptions // closes menu
-                        } label: {
-                            HStack { Image(systemName: "textformat"); Text("Place Textbox") }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(.ultraThinMaterial)
-                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                            showOptions = false
                         }
-                        Button {
+
+                        optionRow(icon: "cube", title: "Place Model") {
                             placingMode = .model
-                            showOptions = !showOptions // closes menu
-                        } label: {
-                            HStack { Image(systemName: "cube"); Text("Place Model") }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(.ultraThinMaterial)
-                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                            showOptions = false
                         }
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 14)
+                    .artifactsPanel(cornerRadius: 22)
+                    .padding(.horizontal, 18)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
                 
@@ -104,25 +96,66 @@ struct HomeARView: View {
     private func fabPlus(primary: Bool) -> some View {
         // changes the bottom icon to be textformat or cube
         let icon = placingMode == .text ? "textformat" : "cube"
-        return Image(systemName: icon)
-                .font(.title2)
-                .padding(20)
-                .background(.ultraThinMaterial)
-                .clipShape(Circle())
-                .shadow(radius: primary ? 8 : 2)
-                .scaleEffect(primary ? 1.0 : 0.85)
-                .opacity(primary ? 1.0 : 0.6) // dim secondary
+        return fabBase(icon: icon, primary: primary)
     }
     
     private func fabCamera(primary: Bool) -> some View {
-        Image(systemName: "camera")
-            .font(.title2)
-            .padding(20)
-            .background(.ultraThinMaterial)
+        fabBase(icon: "camera", primary: primary)
+    }
+
+    private func optionRow(icon: String, title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(Color("MintGreen"))
+                    .frame(width: 34, height: 34)
+                    .background(Color.white.opacity(0.06))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color("MintGreen").opacity(0.18), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                Text(title)
+                    .font(.custom("Poppins-SemiBold", size: 15))
+                    .foregroundColor(Color.white.opacity(0.92))
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(Color.white.opacity(0.45))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Color.white.opacity(0.04))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func fabBase(icon: String, primary: Bool) -> some View {
+        let size: CGFloat = primary ? 58 : 52
+        let bg = primary ? Color("MintGreen") : Color.black.opacity(0.46)
+        let fg = primary ? Color.black.opacity(0.92) : Color.white.opacity(0.92)
+
+        return Image(systemName: icon)
+            .font(.system(size: 18, weight: .bold))
+            .foregroundColor(fg)
+            .frame(width: size, height: size)
+            .background(bg)
+            .overlay(
+                Circle().stroke(primary ? Color("MintGreen").opacity(0.30) : Color("MintGreen").opacity(0.18), lineWidth: 1)
+            )
             .clipShape(Circle())
-            .shadow(radius: primary ? 8 : 2)
-            .scaleEffect(primary ? 1.0 : 0.85)
-            .opacity(primary ? 1.0 : 0.6) // dim secondary
+            .shadow(color: Color.black.opacity(primary ? 0.45 : 0.28), radius: primary ? 18 : 10, x: 0, y: primary ? 12 : 8)
+            .scaleEffect(primary ? 1.0 : 0.88)
+            .opacity(primary ? 1.0 : 0.72)
     }
 }
 #Preview {

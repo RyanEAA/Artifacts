@@ -91,14 +91,17 @@ struct ARViewContainer: UIViewRepresentable {
         let isEmpty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         tv.text = isEmpty ? "Tap to Edit" : text
         // Typography
-        tv.font = .systemFont(ofSize: 16, weight: .medium)
+        tv.font = .systemFont(ofSize: 16, weight: .semibold)
         // Layout & shape
         tv.textAlignment = .center
         tv.textContainerInset = UIEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
         // Color to match AnnotationsView
-        tv.backgroundColor = UIColor.mintGreen.withAlphaComponent(0.9)
-        // Slightly more rectangular than pill
-        tv.layer.cornerRadius = 8
+        tv.backgroundColor = UIColor.mintGreen.withAlphaComponent(0.92)
+        tv.textColor = UIColor.black.withAlphaComponent(0.92)
+        // A bit more modern (larger radius + subtle border)
+        tv.layer.cornerRadius = 14
+        tv.layer.borderWidth = 1
+        tv.layer.borderColor = UIColor.mintGreen.withAlphaComponent(0.35).cgColor
         tv.layer.masksToBounds = true
         // Interaction
         tv.isScrollEnabled = false
@@ -200,9 +203,12 @@ struct ARViewContainer: UIViewRepresentable {
         } else {
             let btn = UIButton(type: .system)
             btn.setTitle("Delete", for: .normal)
-            btn.setTitleColor(.white, for: .normal)
-            btn.backgroundColor = UIColor.systemRed.withAlphaComponent(0.9)
-            btn.layer.cornerRadius = 6
+            btn.setTitleColor(UIColor.white.withAlphaComponent(0.95), for: .normal)
+            btn.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+            btn.backgroundColor = UIColor.systemRed.withAlphaComponent(0.85)
+            btn.layer.cornerRadius = 14
+            btn.layer.borderWidth = 1
+            btn.layer.borderColor = UIColor.systemRed.withAlphaComponent(0.35).cgColor
             btn.layer.masksToBounds = true
             // We route target/action via Coordinator
             (arView.session.delegate as? Coordinator)?.registerDeleteButton(btn, for: id)
@@ -213,7 +219,7 @@ struct ARViewContainer: UIViewRepresentable {
         button.isHidden = false
         // Position will be finalized in layoutAnnotations (called every frame)
         let f = tv.frame
-        button.bounds.size = CGSize(width: 80, height: 32)
+        button.bounds.size = CGSize(width: 92, height: 34)
         button.center = CGPoint(x: f.midX, y: f.maxY + 8 + button.bounds.height/2)
     }
 

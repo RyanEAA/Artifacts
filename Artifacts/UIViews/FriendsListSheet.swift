@@ -5,7 +5,6 @@
 //  Created by Ryan Aparicio on 11/4/25.
 //
 
-
 import SwiftUI
 import FirebaseFirestore
 
@@ -17,285 +16,285 @@ struct FriendsListSheet: View {
 
     @Environment(\.dismiss) private var dismiss
 
-    // Search
     @State private var search = ""
 
-    // Incoming requests (display model)
     struct RequestRow: Identifiable, Hashable {
-        let id: String            // friendLinks doc id
+        let id: String
         let requesterUid: String
         let username: String
-        let avatarURL: URL? = nil  // hook up later if you add profilePictureURL
     }
-    @State private var incoming: [RequestRow] = []
 
-    // Friends/suggestions
+    @State private var incoming: [RequestRow] = []
     @State private var friendRows: [FriendUser] = []
     @State private var suggestions: [FriendUser] = []
-
-    // Link state (from listenAllLinkPartners)
     @State private var pendingUIDs: Set<String> = []
 
-    // Listeners
     @State private var listenerFriends: ListenerRegistration?
     @State private var listenerIncoming: ListenerRegistration?
-    @State private var listenerAllLinks: ListenerRegistration?   // <— add this
+    @State private var listenerAllLinks: ListenerRegistration?
+
+    @State private var searchTask: Task<Void, Never>?
+
+    @State private var selectedChatFriend: FriendUser?
 
     private var myUid: String? { session.user?.uid }
 
+    private var trimmedSearch: String {
+        search.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isSearching: Bool {
+        !trimmedSearch.isEmpty
+    }
+
+    private var filteredFriends: [FriendUser] {
+        let base = friendRows.sorted { $0.username.lowercased() < $1.username.lowercased() }
+        guard isSearching else { return base }
+        let q = trimmedSearch.lowercased()
+        return base.filter { $0.username.lowercased().contains(q) }
+    }
+
     var body: some View {
         NavigationStack {
-            List {
-                // 1) Search bar
-                Section {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass").foregroundColor(.secondary)
-                        TextField("Search friends & users…", text: $search)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled(true)
-                    }
-                }
+            ZStack {
+                FriendsSheetBackground()
+                    .ignoresSafeArea()
 
-                // 2) Friend requests (if any)
-                if !incoming.isEmpty {
-                    Section {
-                        headerRow(
-                            title: "Friend requests",
-                            badge: incoming.count
-                        ) {
-                            Text("See All")
-                                .font(.subheadline)
-                                .foregroundColor(.blue)
-                        }
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 14) {
+                        topBar
 
-                        ForEach(incoming) { r in
-                            facebookRow(
-                                title: r.username,
-                                subtitle: nil,
-                                avatarURL: r.avatarURL,
-                                primaryTitle: "Confirm",
-                                secondaryTitle: "Delete",
-                                onPrimary: { accept(requesterUid: r.requesterUid) },
-                                onSecondary: { decline(requesterUid: r.requesterUid) }
-                            )
-                        }
-                    }
-                }
+                        FriendsSearchField(text: $search)
+                            .padding(.horizontal, 16)
 
-                // 3) Friends + People, depending on search
-                let q = search.trimmingCharacters(in: .whitespacesAndNewlines)
-                let filteredFriends = filteredFriendsList()
-
-                if q.isEmpty {
-                    // === DEFAULT: show ALL friends A–Z ===
-                    Section {
-                        let rowsToShow: [FriendUser] =
-                            !friendRows.isEmpty
-                            ? filteredFriends
-                            : friends
-                              .map { FriendUser(id: $0, username: $0) } // fallback until Firestore resolves
-                              .sorted { $0.username.lowercased() < $1.username.lowercased() }
-
-                        if rowsToShow.isEmpty {
-                            Text("You have no friends yet.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .padding(.vertical, 4)
-                        } else {
-                            ForEach(rowsToShow) { u in
-                                facebookRow(
-                                    title: u.username,
-                                    subtitle: nil,
-                                    avatarURL: nil, // hook up profilePictureURL later if you want
-                                    primaryTitle: "Message",
-                                    secondaryTitle: "Remove",
-                                    onPrimary: {},
-                                    onSecondary: {}
-                                )
+                        if !incoming.isEmpty {
+                            sectionCard(title: "Friend requests", badge: incoming.count) {
+                                VStack(spacing: 10) {
+                                    ForEach(incoming) { r in
+                                        FriendRow(
+                                            title: r.username,
+                                            subtitle: nil,
+                                            leadingSystemImage: "person.fill",
+                                            primaryTitle: "Confirm",
+                                            secondaryTitle: "Delete",
+                                            primaryStyle: .primary,
+                                            secondaryStyle: .danger,
+                                            isPrimaryDisabled: false,
+                                            onPrimary: { accept(requesterUid: r.requesterUid) },
+                                            onSecondary: { decline(requesterUid: r.requesterUid) }
+                                        )
+                                    }
+                                }
                             }
+                            .padding(.horizontal, 16)
+                            .transition(.move(edge: .top).combined(with: .opacity))
                         }
-                    } header: {
-                        headerRow(
-                            title: "Your friends",
-                            badge: max(friendRows.count, friends.count)
-                        ) { EmptyView() }
-                    }
 
-                } else {
-                    // === SEARCH MODE ===
-
-                    // 3a) Friends that match
-                    Section {
-                        if filteredFriends.isEmpty {
-                            Text("No friends match “\(q)”.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .padding(.vertical, 4)
-                        } else {
-                            ForEach(filteredFriends) { u in
-                                facebookRow(
-                                    title: u.username,
-                                    subtitle: nil,
-                                    avatarURL: nil,
-                                    primaryTitle: "Message",
-                                    secondaryTitle: "Remove",
-                                    onPrimary: {},
-                                    onSecondary: {}
-                                )
-                            }
-                        }
-                    } header: {
-                        headerRow(
-                            title: "Friends",
-                            badge: filteredFriends.count
-                        ) { EmptyView() }
-                    }
-
-                    // 3b) People (non-friends & not pending) — uses `suggestions` filled by runSearch(prefix:)
-                    Section {
-                        if suggestions.isEmpty {
-                            Text("No people found.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .padding(.vertical, 4)
-                        } else {
-                            ForEach(suggestions) { u in
-                                let isPending = pendingUIDs.contains(u.id)
-
-                                facebookRow(
-                                    title: u.username,
-                                    subtitle: nil,
-                                    avatarURL: nil,
-                                    primaryTitle: isPending ? "Sent" : "Add",
-                                    secondaryTitle: isPending ? "Unsend" : "Hide",
-                                    onPrimary: {
-                                        if !isPending {
-                                            add(username: u.username)
-                                        }
-                                    },
-                                    onSecondary: {
-                                        if isPending {
-                                            unsend(userId: u.id)
-                                        } else {
-                                            // Optional: hide from local suggestions
-                                            // suggestions.removeAll { $0.id == u.id }
+                        if !isSearching {
+                            sectionCard(title: "Friends", badge: max(friendRows.count, friends.count)) {
+                                let rows = resolvedFriendsForDefaultView()
+                                if rows.isEmpty {
+                                    EmptyStateRow(
+                                        systemImage: "person.2",
+                                        title: "No friends yet",
+                                        message: "Search a username to send a request."
+                                    )
+                                } else {
+                                    VStack(spacing: 10) {
+                                        ForEach(rows) { u in
+                                            FriendRow(
+                                                title: u.username,
+                                                subtitle: nil,
+                                                leadingSystemImage: "person.fill",
+                                                primaryTitle: "Message",
+                                                secondaryTitle: "Remove",
+                                                primaryStyle: .primary,
+                                                secondaryStyle: .secondary,
+                                                isPrimaryDisabled: false,
+                                                onPrimary: { selectedChatFriend = u },
+                                                onSecondary: { removeFriend(friendUid: u.id) }
+                                            )
                                         }
                                     }
-                                )
+                                }
                             }
-                        }
-                    } header: {
-                        headerRow(
-                            title: "People",
-                            badge: suggestions.count
-                        ) { EmptyView() }
-                    }
-                }
-            }
-            .listStyle(.insetGrouped)
-            .navigationTitle("Friends")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
-                }
-            }
-        }
+                            .padding(.horizontal, 16)
+                        } else {
+                            sectionCard(title: "Friends", badge: filteredFriends.count) {
+                                if filteredFriends.isEmpty {
+                                    EmptyStateRow(
+                                        systemImage: "magnifyingglass",
+                                        title: "No matches",
+                                        message: "Try a different search."
+                                    )
+                                } else {
+                                    VStack(spacing: 10) {
+                                        ForEach(filteredFriends) { u in
+                                            FriendRow(
+                                                title: u.username,
+                                                subtitle: nil,
+                                                leadingSystemImage: "person.fill",
+                                                primaryTitle: "Message",
+                                                secondaryTitle: "Remove",
+                                                primaryStyle: .primary,
+                                                secondaryStyle: .secondary,
+                                                isPrimaryDisabled: false,
+                                                onPrimary: { selectedChatFriend = u },
+                                                onSecondary: { removeFriend(friendUid: u.id) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 16)
 
+                            sectionCard(title: "People", badge: suggestions.count) {
+                                if suggestions.isEmpty {
+                                    EmptyStateRow(
+                                        systemImage: "person.crop.circle.badge.questionmark",
+                                        title: "No people found",
+                                        message: "Search by exact prefix."
+                                    )
+                                } else {
+                                    VStack(spacing: 10) {
+                                        ForEach(suggestions) { u in
+                                            let isPending = pendingUIDs.contains(u.id)
+
+                                            FriendRow(
+                                                title: u.username,
+                                                subtitle: isPending ? "Request sent" : nil,
+                                                leadingSystemImage: "person.fill",
+                                                primaryTitle: isPending ? "Sent" : "Add",
+                                                secondaryTitle: isPending ? "Unsend" : "Hide",
+                                                primaryStyle: isPending ? .secondary : .primary,
+                                                secondaryStyle: .secondary,
+                                                isPrimaryDisabled: isPending,
+                                                onPrimary: {
+                                                    if !isPending { add(username: u.username) }
+                                                },
+                                                onSecondary: {
+                                                    if isPending {
+                                                        unsend(userId: u.id)
+                                                    } else {
+                                                        withAnimation(.easeInOut(duration: 0.20)) {
+                                                            suggestions.removeAll { $0.id == u.id }
+                                                        }
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                        }
+
+                        Spacer(minLength: 12)
+                    }
+                    .padding(.top, 10)
+                    .padding(.bottom, 18)
+                }
+            }
+            .navigationBarHidden(true)
+        }
+        .presentationBackground(.black)
         .onAppear(perform: startListening)
         .onDisappear {
             listenerFriends?.remove()
             listenerIncoming?.remove()
             listenerAllLinks?.remove()
+            searchTask?.cancel()
         }
-        .onChange(of: search) { _, _ in debounceSearch() }
+        .onChange(of: search) { _, _ in
+            debounceSearch()
+        }
+        .sheet(item: $selectedChatFriend) { friend in
+            ChatView(friend: friend)
+                .environmentObject(session)
+                .presentationDetents([.large])
+                .presentationBackground(.black)
+        }
     }
 
-    // MARK: - Header + Facebook row components
+    private var topBar: some View {
+        HStack(spacing: 12) {
+            Text("Friends")
+                .font(.custom("Poppins-Bold", size: 22))
+                .foregroundColor(Color.white.opacity(0.92))
 
-    @ViewBuilder
-    private func headerRow<Trailing: View>(
+            Spacer()
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(Color.white.opacity(0.88))
+                    .frame(width: 36, height: 36)
+                    .background(Color.white.opacity(0.06))
+                    .overlay(
+                        Circle().stroke(Color("MintGreen").opacity(0.18), lineWidth: 1)
+                    )
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+    }
+
+    private func sectionCard<Content: View>(
         title: String,
         badge: Int,
-        @ViewBuilder trailing: () -> Trailing
+        @ViewBuilder content: () -> Content
     ) -> some View {
-        HStack {
-            HStack(spacing: 6) {
-                Text(title).font(.headline.weight(.semibold))
-                Text("\(badge)").font(.headline.weight(.semibold)).foregroundStyle(.red)
-            }
-            Spacer()
-            trailing()
-        }
-        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
-    }
-
-    @ViewBuilder
-    private func facebookRow(
-        title: String,
-        subtitle: String?,
-        avatarURL: URL?,
-        primaryTitle: String,
-        secondaryTitle: String,
-        onPrimary: @escaping () -> Void,
-        onSecondary: @escaping () -> Void
-    ) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            // Avatar
-            ZStack {
-                Circle().fill(Color.gray.opacity(0.15))
-                Image(systemName: "person.fill")
-                    .foregroundStyle(.secondary)
-            }
-            .frame(width: 48, height: 48)
-
-            // Name + subtitle
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.body.weight(.semibold))
-                if let subtitle { Text(subtitle).font(.subheadline).foregroundStyle(.secondary) }
-            }
-
-            Spacer()
-
-            // Buttons like Facebook
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                Button(action: onPrimary) {
-                    Text(primaryTitle)
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.blue)
-                        .foregroundStyle(.white)
-                        .clipShape(Capsule())
-                }
-                Button(action: onSecondary) {
-                    Text(secondaryTitle)
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.gray.opacity(0.15))
-                        .foregroundStyle(.primary)
-                        .clipShape(Capsule())
-                }
+                Text(title)
+                    .font(.custom("Poppins-SemiBold", size: 15))
+                    .foregroundColor(Color.white.opacity(0.90))
+
+                CountBadge(value: badge)
+
+                Spacer()
             }
+
+            content()
         }
+        .padding(14)
+        .background(FriendsCardBackground())
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .cornerRadius(18)
+        .shadow(color: Color.black.opacity(0.50), radius: 18, x: 0, y: 12)
     }
+
+    private func resolvedFriendsForDefaultView() -> [FriendUser] {
+        if !friendRows.isEmpty {
+            return friendRows.sorted { $0.username.lowercased() < $1.username.lowercased() }
+        }
+
+        return friends
+            .map { FriendUser(id: $0, username: $0) }
+            .sorted { $0.username.lowercased() < $1.username.lowercased() }
+    }
+
     private func startAllLinksListener() {
         do {
-            listenerAllLinks = try friendsService.listenAllLinkPartners { partners, pending, accepted in
-                // We only need pending UIDs for "Sent/Unsend"
+            listenerAllLinks = try friendsService.listenAllLinkPartners { _, pending, _ in
                 Task { @MainActor in
                     self.pendingUIDs = pending
                 }
             }
         } catch {
-            print("⚠️ listenAllLinkPartners failed:", error)
+            print("listenAllLinkPartners failed:", error)
         }
     }
 
-
-    // MARK: - Data
     private func startListening() {
-        // First: one-shot fetch so the list is not empty when opening the sheet
         Task {
             do {
                 let uids = try await friendsService.fetchAcceptedFriendUIDsOnce()
@@ -303,14 +302,13 @@ struct FriendsListSheet: View {
                 let sorted = users.sorted { $0.username.lowercased() < $1.username.lowercased() }
                 await MainActor.run {
                     self.friendRows = sorted
-                    self.friends = sorted.map { $0.username }  // keep external binding in sync
+                    self.friends = sorted.map { $0.username }
                 }
             } catch {
-                print("🔥 fetchAcceptedFriendUIDsOnce error:", error)
+                print("fetchAcceptedFriendUIDsOnce error:", error)
             }
         }
 
-        // Then: the live listener to keep it updated
         do {
             listenerFriends = try friendsService.listenFriendUIDs { uids in
                 Task {
@@ -323,41 +321,39 @@ struct FriendsListSheet: View {
                 }
             }
         } catch {
-            print("🔥 listenFriendUIDs failed to start:", error)
+            print("listenFriendUIDs failed:", error)
         }
 
-        // Incoming requests listener (recipient == me)
         do {
             listenerIncoming = try friendsService.listenIncomingRequests { rows in
                 Task {
                     let requesters = rows.map { $0.requesterUid }
                     let users = try? await friendsService.fetchUsernames(for: requesters)
                     let map = Dictionary(uniqueKeysWithValues: (users ?? []).map { ($0.id, $0.username) })
-                    let display = rows.map { RequestRow(id: $0.id, requesterUid: $0.requesterUid, username: map[$0.requesterUid] ?? "user") }
-                        .sorted { $0.username.lowercased() < $1.username.lowercased() }
+                    let display = rows.map {
+                        RequestRow(id: $0.id, requesterUid: $0.requesterUid, username: map[$0.requesterUid] ?? "user")
+                    }
+                    .sorted { $0.username.lowercased() < $1.username.lowercased() }
+
                     await MainActor.run { self.incoming = display }
                 }
             }
         } catch {
-            print("🔥 listenIncomingRequests failed to start:", error)
+            print("listenIncomingRequests failed:", error)
         }
-        
+
         startAllLinksListener()
     }
 
-    private func filteredFriendsList() -> [FriendUser] {
-        let q = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let base = friendRows.sorted { $0.username.lowercased() < $1.username.lowercased() }
-        guard !q.isEmpty else { return base }
-        return base.filter { $0.username.lowercased().contains(q) }
-    }
-
-    // Debounced global search (People)
-    @State private var searchTask: Task<Void, Never>?
     private func debounceSearch() {
         searchTask?.cancel()
-        let q = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { suggestions = []; return }
+
+        let q = trimmedSearch
+        guard !q.isEmpty else {
+            suggestions = []
+            return
+        }
+
         searchTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 250_000_000)
             await runSearch(prefix: q)
@@ -367,15 +363,18 @@ struct FriendsListSheet: View {
     @MainActor
     private func runSearch(prefix: String) async {
         guard let me = myUid else { return }
-        let existing = Set(friendRows.map { $0.id }).union(incoming.map { $0.requesterUid })
+
+        let existing = Set(friendRows.map { $0.id })
+            .union(incoming.map { $0.requesterUid })
+
         let results = (try? await friendsService.searchUsernames(prefix: prefix, limit: 25)) ?? []
+
         let filtered = results
             .filter { $0.id != me && !existing.contains($0.id) }
             .sorted { $0.username.lowercased() < $1.username.lowercased() }
+
         self.suggestions = filtered
     }
-
-    // MARK: - Actions
 
     private func add(username: String) {
         Task {
@@ -397,20 +396,308 @@ struct FriendsListSheet: View {
             catch { print("decline error:", error) }
         }
     }
-    
+
     private func unsend(userId: String) {
         Task {
-            do {
-                try await friendsService.removeLink(with: userId)
-            } catch {
-                print("unsend error:", error)
-            }
+            do { try await friendsService.removeLink(with: userId) }
+            catch { print("unsend error:", error) }
+        }
+    }
+
+    private func removeFriend(friendUid: String) {
+        Task {
+            do { try await friendsService.removeLink(with: friendUid) }
+            catch { print("removeFriend error:", error) }
         }
     }
 }
 
-#Preview {
-    FriendsListSheet(friends: .constant(["sarah_creates","devon_art","luna_doodles"]))
-        .environmentObject(SessionManager())
-        .environmentObject(FriendsService())
+private struct FriendsSheetBackground: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                gradient: Gradient(stops: [
+                    .init(color: Color.black, location: 0.00),
+                    .init(color: Color("DarkGray").opacity(0.98), location: 0.60),
+                    .init(color: Color.black.opacity(0.96), location: 1.00)
+                ]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            LinearGradient(
+                gradient: Gradient(colors: [
+                    Color("MintGreen").opacity(0.08),
+                    Color.clear
+                ]),
+                startPoint: .topTrailing,
+                endPoint: .center
+            )
+
+            RadialGradient(
+                gradient: Gradient(colors: [
+                    Color.black.opacity(0.00),
+                    Color.black.opacity(0.60)
+                ]),
+                center: .center,
+                startRadius: 140,
+                endRadius: 640
+            )
+        }
+    }
+}
+
+private struct FriendsCardBackground: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 18)
+            .fill(Color.black.opacity(0.46))
+            .background(
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(Color.white.opacity(0.05))
+            )
+    }
+}
+
+private struct CountBadge: View {
+    let value: Int
+
+    var body: some View {
+        Text("\(value)")
+            .font(.custom("Poppins-SemiBold", size: 12))
+            .foregroundColor(Color.black.opacity(0.90))
+            .frame(height: 20)
+            .padding(.horizontal, 8)
+            .background(Color("MintGreen"))
+            .clipShape(Capsule())
+    }
+}
+
+private struct FriendsSearchField: View {
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(Color("MintGreen").opacity(0.85))
+
+            ZStack(alignment: .leading) {
+                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("Search usernames")
+                        .font(.custom("Poppins-Regular", size: 15))
+                        .foregroundColor(Color.white.opacity(0.38))
+                }
+
+                TextField("", text: $text)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+                    .foregroundColor(Color.white.opacity(0.92))
+                    .tint(Color("MintGreen"))
+            }
+
+            if !text.isEmpty {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) { text = "" }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(Color.white.opacity(0.35))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 12)
+        .background(Color.white.opacity(0.06))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color("MintGreen").opacity(0.14), lineWidth: 1)
+        )
+        .cornerRadius(16)
+    }
+}
+
+private struct EmptyStateRow: View {
+    let systemImage: String
+    let title: String
+    let message: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color("MintGreen").opacity(0.14))
+                    .frame(width: 38, height: 38)
+                Image(systemName: systemImage)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(Color("MintGreen").opacity(0.92))
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.custom("Poppins-SemiBold", size: 14))
+                    .foregroundColor(Color.white.opacity(0.90))
+
+                Text(message)
+                    .font(.custom("Poppins-Regular", size: 12))
+                    .foregroundColor(Color.white.opacity(0.65))
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+private struct FriendRow: View {
+    enum ActionStyle {
+        case primary
+        case secondary
+        case danger
+    }
+
+    let title: String
+    let subtitle: String?
+    let leadingSystemImage: String
+
+    let primaryTitle: String
+    let secondaryTitle: String
+
+    let primaryStyle: ActionStyle
+    let secondaryStyle: ActionStyle
+
+    let isPrimaryDisabled: Bool
+
+    let onPrimary: () -> Void
+    let onSecondary: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.white.opacity(0.06))
+                    .frame(width: 46, height: 46)
+                    .overlay(
+                        Circle().stroke(Color("MintGreen").opacity(0.18), lineWidth: 1)
+                    )
+
+                Image(systemName: leadingSystemImage)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(Color("MintGreen").opacity(0.92))
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("@\(title)")
+                    .font(.custom("Poppins-SemiBold", size: 15))
+                    .foregroundColor(Color.white.opacity(0.92))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.custom("Poppins-Regular", size: 12))
+                        .foregroundColor(Color.white.opacity(0.62))
+                        .lineLimit(1)
+                }
+            }
+            .layoutPriority(10)
+
+            Spacer(minLength: 8)
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    ActionCapsuleButton(
+                        title: secondaryTitle,
+                        style: secondaryStyle,
+                        isDisabled: false,
+                        onTap: onSecondary
+                    )
+
+                    ActionCapsuleButton(
+                        title: primaryTitle,
+                        style: primaryStyle,
+                        isDisabled: isPrimaryDisabled,
+                        onTap: onPrimary
+                    )
+                }
+
+                VStack(spacing: 8) {
+                    ActionCapsuleButton(
+                        title: primaryTitle,
+                        style: primaryStyle,
+                        isDisabled: isPrimaryDisabled,
+                        onTap: onPrimary
+                    )
+
+                    ActionCapsuleButton(
+                        title: secondaryTitle,
+                        style: secondaryStyle,
+                        isDisabled: false,
+                        onTap: onSecondary
+                    )
+                }
+            }
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .background(Color.white.opacity(0.06))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+        )
+        .cornerRadius(16)
+    }
+}
+
+private struct ActionCapsuleButton: View {
+    let title: String
+    let style: FriendRow.ActionStyle
+    let isDisabled: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button {
+            onTap()
+        } label: {
+            Text(title)
+                .font(.custom("Poppins-SemiBold", size: 13))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 92)
+                .padding(.vertical, 8)
+                .padding(.horizontal, 12)
+                .foregroundColor(foreground)
+                .background(background)
+                .overlay(
+                    Capsule().stroke(stroke, lineWidth: 1)
+                )
+                .clipShape(Capsule())
+                .opacity(isDisabled ? 0.55 : 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+    }
+
+    private var foreground: Color {
+        switch style {
+        case .primary: return Color.black.opacity(0.92)
+        case .secondary: return Color.white.opacity(0.90)
+        case .danger: return Color.white.opacity(0.90)
+        }
+    }
+
+    private var background: Color {
+        switch style {
+        case .primary: return Color("MintGreen")
+        case .secondary: return Color.white.opacity(0.06)
+        case .danger: return Color.red.opacity(0.22)
+        }
+    }
+
+    private var stroke: Color {
+        switch style {
+        case .primary: return Color("MintGreen").opacity(0.20)
+        case .secondary: return Color.white.opacity(0.10)
+        case .danger: return Color.red.opacity(0.30)
+        }
+    }
 }

@@ -16,50 +16,42 @@ struct BrowseButtons: View {
     @Binding var showBrowse: Bool
     @Binding var showSettings: Bool
     @Binding var showProfile: Bool
-    var body: some View{
-            
+    var body: some View {
+        HStack {
+            Spacer()
 
+            MostRecentlyPlacedButton()
+                .hidden(self.placementSettings.recentlyPlaced.isEmpty)
 
-                
-            HStack{
-                
-                Spacer()
-                
-                // most recently pressed button
-                MostRecentlyPlacedButton().hidden(self.placementSettings.recentlyPlaced.isEmpty)
-                
-                
-                Spacer()
-                Spacer()
+            Spacer()
+            Spacer()
 
-                
-                // browse button
-                ControlButton(systemIconName: "square.grid.2x2"){
-                    print("Browse Button Pressed...")
-                    self.showBrowse.toggle()
-                }.sheet(isPresented: $showBrowse) {
-                    // browse view needs to be returned
-                    BrowseView(showBrowse: $showBrowse)
-                        .environmentObject(placementSettings)
-                }
-                
-                Spacer()
-                Spacer()
+            ControlButton(systemIconName: "square.grid.2x2") {
+                print("Browse Button Pressed...")
+                self.showBrowse.toggle()
+            }
+            .sheet(isPresented: $showBrowse) {
+                BrowseView(showBrowse: $showBrowse)
+                    .environmentObject(placementSettings)
+                    .preferredColorScheme(.dark)
+                    .presentationBackground(.black)
+            }
 
-                
-                // Settings button
-                ControlButton(systemIconName: "slider.horizontal.3"){
-                    print("Settings Button Pressed...")
-                    self.showSettings.toggle()
-                }.sheet(isPresented: $showSettings) {
-                    SettingsView(showSettings: $showSettings)
-                }
-                Spacer()
-                                    
-            
+            Spacer()
+            Spacer()
+
+            ControlButton(systemIconName: "slider.horizontal.3") {
+                print("Settings Button Pressed...")
+                self.showSettings.toggle()
+            }
+            .sheet(isPresented: $showSettings) {
+                SettingsView(showSettings: $showSettings)
+                    .preferredColorScheme(.dark)
+                    .presentationBackground(.black)
+            }
+
+            Spacer()
         }
- 
-        
     }
 }
 
@@ -162,6 +154,8 @@ struct ControlView: View {
                     ProfileViewButton(isProfileVisible: $showProfile)
                         .sheet(isPresented: $showProfile) {
                             QuickProfileView()
+                                .preferredColorScheme(.dark)
+                                .presentationBackground(.black)
                         }
                 }
 
@@ -184,22 +178,23 @@ struct ControlVisibilityToggleButton: View{
     var body: some View{
         HStack{
             Spacer()
-            
-            ZStack {
-                Color.black.opacity(0.25)
-                
-                Button(action: {
-                    print("Control Visibility Toggle Button Pressed")
-                    self.isControlsVisible.toggle()
-                }) {
-                    Image(systemName: self.isControlsVisible ? "rectangle" : "slider.horizontal.below.rectangle")
-                        .font(.system(size: 25))
-                        .foregroundColor(.white)
-                        .buttonStyle(PlainButtonStyle())
-                }
+
+            Button(action: {
+                print("Control Visibility Toggle Button Pressed")
+                self.isControlsVisible.toggle()
+            }) {
+                Image(systemName: self.isControlsVisible ? "rectangle" : "slider.horizontal.below.rectangle")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(Color("MintGreen").opacity(0.92))
+                    .frame(width: 44, height: 44)
+                    .background(Color.white.opacity(0.06))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color("MintGreen").opacity(0.18), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
             }
-            .frame(width: 50, height: 50)
-            .cornerRadius(8)
+            .buttonStyle(.plain)
         }
         .padding(.top, 45)
         .padding(.trailing, 20)
@@ -212,21 +207,23 @@ struct ProfileViewButton: View{
     @Binding var isProfileVisible: Bool
     var body: some View{
         HStack{
-            ZStack {
-                Color.black.opacity(0.25)
-                
-                Button(action: {
-                    print("Profile Button Pressed")
-                    self.isProfileVisible.toggle()
-                }) {
-                    Image(systemName: "person.crop.circle")
-                        .font(.system(size: 25))
-                        .foregroundColor(.white)
-                        .buttonStyle(PlainButtonStyle())
-                }
+
+            Button(action: {
+                print("Profile Button Pressed")
+                self.isProfileVisible.toggle()
+            }) {
+                Image(systemName: "person.crop.circle")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(Color("MintGreen").opacity(0.92))
+                    .frame(width: 44, height: 44)
+                    .background(Color.white.opacity(0.06))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color("MintGreen").opacity(0.18), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
             }
-            .frame(width: 50, height: 50)
-            .cornerRadius(8)
+            .buttonStyle(.plain)
         }
         .padding(.top, 45)
         .padding(.leading, 20)
@@ -242,11 +239,17 @@ struct ControlModePicker: View {
     
     init(selectedControlMode: Binding<Int>) {
         self._selectedControlMode = selectedControlMode
-        
-        UISegmentedControl.appearance().selectedSegmentTintColor = .clear
-        UISegmentedControl.appearance().setTitleTextAttributes([.foregroundColor: UIColor(displayP3Red: 1.0, green: 0.827, blue: 0, alpha: 1)], for: .selected)
-        UISegmentedControl.appearance().setTitleTextAttributes([.foregroundColor: UIColor.white], for: .normal)
-        UISegmentedControl.appearance().backgroundColor = UIColor(Color.black.opacity(0.25))
+
+        UISegmentedControl.appearance().selectedSegmentTintColor = UIColor(Color("MintGreen"))
+        UISegmentedControl.appearance().setTitleTextAttributes([
+            .foregroundColor: UIColor.black,
+            .font: UIFont.systemFont(ofSize: 13, weight: .semibold)
+        ], for: .selected)
+        UISegmentedControl.appearance().setTitleTextAttributes([
+            .foregroundColor: UIColor.white,
+            .font: UIFont.systemFont(ofSize: 13, weight: .semibold)
+        ], for: .normal)
+        UISegmentedControl.appearance().backgroundColor = UIColor(Color.black.opacity(0.55))
 
     }
     
@@ -260,6 +263,13 @@ struct ControlModePicker: View {
         .pickerStyle(SegmentedPickerStyle())
         .frame(maxWidth: 400)
         .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color.black.opacity(0.35))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color("MintGreen").opacity(0.14), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
         
     }
 }
@@ -282,8 +292,14 @@ struct ControlButtonBar: View{
             }
         }
         .frame(maxWidth: 500)
-        .padding(30)
-        .background(Color.black.opacity(0.25))
+        .padding(18)
+        .background(Color.black.opacity(0.36))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 22))
+        .padding(.bottom, 18)
     }
 }
 
@@ -295,10 +311,17 @@ struct ControlButton: View {
             self.action()
         }) {
             Image(systemName: self.systemIconName)
-                .font(.system(size: 35))
-                .foregroundColor(.white)
-                .buttonStyle(PlainButtonStyle())
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(Color.white.opacity(0.92))
+                .frame(width: 50, height: 50)
+                .background(Color.white.opacity(0.06))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color("MintGreen").opacity(0.16), lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 16))
         }
+        .buttonStyle(.plain)
     }
 }
 
@@ -313,19 +336,27 @@ struct MostRecentlyPlacedButton: View{
                 // colelction not empy
                 Image(uiImage: mostRecentlyPlacedModel.thumbnail)
                     .resizable()
-                    .frame(width: 46)
+                    .frame(width: 44, height: 44)
                     .aspectRatio(1/1, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color("MintGreen").opacity(0.18), lineWidth: 1)
+                    )
             } else {
                 Image(systemName: "clock.fill")
-                    .font(.system(size: 35))
-                    .foregroundColor(.white)
-                    .buttonStyle(.plain)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(Color("MintGreen").opacity(0.92))
             
             }
         }
         .frame(width: 50, height: 50)
-        .background(Color.white)
-        .cornerRadius(8)
+        .background(Color.white.opacity(0.06))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color("MintGreen").opacity(0.16), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
 
     }
 }

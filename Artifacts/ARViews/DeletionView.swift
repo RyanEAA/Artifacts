@@ -12,55 +12,103 @@ struct DeletionView: View {
     @EnvironmentObject var modelDeletionManager: ModelDeletionManager
     
     var body: some View {
-        HStack {
-            
-            Spacer()
-            
-            DeletionButton(systemIconName: "xmark.circle.fill") {
+        HStack(spacing: 14) {
+            DeleteActionButton(kind: .cancel) {
                 print("Cancel Deletion button Pressed")
                 self.modelDeletionManager.entitySelectedForDeletion = nil
             }
-            
-            Spacer()
 
-            
-            DeletionButton(systemIconName: "trash.circle.fill") {
-                print("Cofirm Deletion button Pressed")
-                
+            Spacer(minLength: 0)
+
+            DeleteActionButton(kind: .delete) {
+                print("Confirm Deletion button Pressed")
+
                 guard let anchor = self.modelDeletionManager.entitySelectedForDeletion?.anchor else { return }
-                
+
                 let anchoringIdentifier = anchor.anchorIdentifier
-                if let index = self.sceneManager.anchorEntities.firstIndex(where: { $0.anchorIdentifier == anchoringIdentifier}) {
+                if let index = self.sceneManager.anchorEntities.firstIndex(where: { $0.anchorIdentifier == anchoringIdentifier }) {
                     self.sceneManager.anchorEntities.remove(at: index)
                 }
-                
+
                 anchor.removeFromParent()
-                
                 self.modelDeletionManager.entitySelectedForDeletion = nil
             }
-            
-            Spacer()
-
         }
-        .padding(.bottom, 30)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .background(Color.black.opacity(0.38))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 22))
+        .padding(.horizontal, 18)
+        .padding(.bottom, 18)
     }
 }
 
-struct DeletionButton: View{
-    let systemIconName: String
+private enum DeleteActionKind {
+    case cancel
+    case delete
+}
+
+private struct DeleteActionButton: View {
+    let kind: DeleteActionKind
     let action: () -> Void
-    
-    var body: some View{
-        
-        Button(action: {
-            self.action()
-        }) {
-            Image(systemName: systemIconName)
-                .font(.system(size: 50, weight: .light, design: .default))
-                .foregroundColor(.white)
-                .buttonStyle(PlainButtonStyle())
+
+    private var icon: String {
+        switch kind {
+        case .cancel: return "xmark"
+        case .delete: return "trash"
         }
-        .frame(width: 75, height: 75)
-        
+    }
+
+    private var title: String {
+        switch kind {
+        case .cancel: return "Cancel"
+        case .delete: return "Delete"
+        }
+    }
+
+    private var bg: Color {
+        switch kind {
+        case .cancel: return Color.white.opacity(0.06)
+        case .delete: return Color.red.opacity(0.26)
+        }
+    }
+
+    private var fg: Color {
+        switch kind {
+        case .cancel: return Color.white.opacity(0.92)
+        case .delete: return Color.white.opacity(0.92)
+        }
+    }
+
+    private var stroke: Color {
+        switch kind {
+        case .cancel: return Color("MintGreen").opacity(0.16)
+        case .delete: return Color.red.opacity(0.35)
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .bold))
+                Text(title)
+                    .font(.custom("Poppins-SemiBold", size: 14))
+            }
+            .foregroundColor(fg)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(bg)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(stroke, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
     }
 }
