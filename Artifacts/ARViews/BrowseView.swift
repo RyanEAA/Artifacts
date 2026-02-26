@@ -13,6 +13,7 @@ struct BrowseView: View {
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
+                AnnotationToolButton(showBrowse: $showBrowse)
                 VStack(spacing: 18) {
                     RecentsGrid(showBrowse: $showBrowse)
                     ModelsByCategoryGrid(showBrowse: $showBrowse)
@@ -45,6 +46,39 @@ struct BrowseView: View {
             }
         }
         .tint(Color("MintGreen"))
+    }
+}
+
+struct AnnotationToolButton: View {
+    @EnvironmentObject var placementSettings: PlacementSettings
+    @Binding var showBrowse: Bool
+    
+    var body: some View {
+        VStack(alignment: .leading) {
+
+            Spacer()
+
+            Text("Tools")
+                .font(.title2).bold()
+                .padding(.leading, 22)
+
+            Button(action: {
+                placementSettings.selectedTool = .annotation
+                showBrowse = false
+            }) {
+                HStack {
+                    Image(systemName: "text.bubble.fill")
+                        .font(.largeTitle)
+
+                    Text("Annotation")
+                        .font(.headline)
+                }
+                .padding()
+//                .background(Color.secondarySystemFill)
+                .cornerRadius(10)
+            }
+            .padding(.horizontal, 22)
+        }
     }
 }
 
@@ -113,7 +147,8 @@ struct HorizontalGrid: View {
                         ItemButton(model: model) {
                             model.asyncLoadModelEntity { completed, _ in
                                 if completed {
-                                    self.placementSettings.selectedModel = model
+//                                    self.placementSettings.selectedModel = model
+                                    self.placementSettings.selectedTool = .model(model)
                                 }
                             }
                             print("BrowseView: selected \(model.name) for placement")

@@ -10,6 +10,13 @@ import RealityKit
 import Combine
 import ARKit
 
+enum PlacementTool {
+    case none
+    case model(Model)
+    case annotation
+}
+
+
 struct ModelAnchor {
     var model: Model
     var anchor: ARAnchor?
@@ -17,6 +24,7 @@ struct ModelAnchor {
 
 class PlacementSettings: ObservableObject {
     // when user selects a model in BrowseView, this property is set
+    @Published var selectedTool: PlacementTool = .none
     @Published var selectedModel: Model?{
         willSet(newValue){
             print("setting selectedModel to \(String(describing: newValue?.name))")
