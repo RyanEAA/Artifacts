@@ -254,6 +254,8 @@ struct ARViewContainer: UIViewRepresentable {
         attachAnnotationView(for: anchor, data: payload, on: arView)
         self.sceneManager.hasBeenTapped[id] = (text != "Tap to Edit")
         self.sceneManager.pendingAnnotationText = nil
+        
+        self.placementSettings.selectedTool = .none
     }
     
     private func place(_ modelEntity: ModelEntity, for anchor: ARAnchor, in arView: ARView) {
@@ -467,8 +469,17 @@ extension ARViewContainer {
                 return
             }
             
-            // 3) Otherwise, create a new annotation at tap
-            parent.placeAnnotation(at: location, on: arView)
+            switch parent.placementSettings.selectedTool {
+            case .annotation:
+                parent.placeAnnotation(at: location, on: arView)
+
+            case .model(let model):
+                // existing model placement flow handles this
+                return
+
+            case .none:
+                return
+            }
         }
 
         @objc func handleDeleteButton(_ sender: UIButton) {
