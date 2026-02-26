@@ -16,27 +16,50 @@ enum PlacementTool {
     case annotation
 }
 
-
 struct ModelAnchor {
     var model: Model
     var anchor: ARAnchor?
 }
 
 class PlacementSettings: ObservableObject {
-    // when user selects a model in BrowseView, this property is set
+
+    /// Single source of truth for what tool is active.
     @Published var selectedTool: PlacementTool = .none
-    @Published var selectedModel: Model?{
-        willSet(newValue){
-            print("setting selectedModel to \(String(describing: newValue?.name))")
-        }
+
+    /// Convenience accessor — derived from selectedTool.
+    /// Read-only; set selectedTool instead.
+    var selectedModel: Model? {
+        if case .model(let m) = selectedTool { return m }
+        return nil
     }
-    
-    // this property keeps track of the order of models that have been placed. Last item is the most recently placed
+
+    // Keeps track of the order of placed models; last item is most recent
     @Published var recentlyPlaced: [Model] = []
-    
-    // this property will keep track of all the content that has been configured
+
+    // Models queued to be placed in the next scene update tick
     var modelsConfirmedForPlacement: [ModelAnchor] = []
-    
-    // retains cancellable object for our SceneEvents.Update subscriber
+
+    // Retains the SceneEvents.Update subscriber
     var sceneObserver: Cancellable?
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

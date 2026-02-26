@@ -330,7 +330,9 @@ struct MostRecentlyPlacedButton: View{
     var body: some View{
         Button(action:{
             print("most recently placed button pressed")
-            self.placementSettings.selectedModel = self.placementSettings.recentlyPlaced.last
+            if let model = self.placementSettings.recentlyPlaced.last {
+                self.placementSettings.selectedTool = .model(model)
+            }
         }){
             if let mostRecentlyPlacedModel = self.placementSettings.recentlyPlaced.last {
                 // colelction not empy
@@ -360,7 +362,6 @@ struct MostRecentlyPlacedButton: View{
 
     }
 }
-
 extension Notification.Name {
     static let clearAllAnnotations = Notification.Name("ClearAllAnnotationsNotification")
 }

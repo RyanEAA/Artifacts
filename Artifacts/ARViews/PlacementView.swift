@@ -9,35 +9,52 @@ import SwiftUI
 
 struct PlacementView: View {
     @EnvironmentObject var placementSettings: PlacementSettings
+
     var body: some View {
-        HStack(spacing: 14) {
-            PlacementActionButton(kind: .cancel) {
-                print("Cancel Placement Button Pressed")
-                self.placementSettings.selectedModel = nil
-            }
-
-            Spacer(minLength: 0)
-
-            PlacementActionButton(kind: .confirm) {
-                print("Confirm Placement Button Pressed")
-
-                let modelAnchor = ModelAnchor(model: self.placementSettings.selectedModel!, anchor: nil)
-                self.placementSettings.modelsConfirmedForPlacement.append(modelAnchor)
-                self.placementSettings.selectedModel = nil
-            }
+        // Only render when a 3D model tool is active
+        guard case .model(let model) = placementSettings.selectedTool else {
+            return AnyView(EmptyView())
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
-        .background(Color.black.opacity(0.38))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22)
-                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+
+        return AnyView(
+            HStack(spacing: 14) {
+                PlacementActionButton(kind: .cancel) {
+                    print("Cancel Placement Button Pressed")
+                    placementSettings.selectedTool = .none
+                }
+
+                Spacer(minLength: 0)
+
+                // Model name in the middle
+                Text(model.name)
+                    .font(.custom("Poppins-SemiBold", size: 13))
+                    .foregroundColor(.white.opacity(0.75))
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+
+                PlacementActionButton(kind: .confirm) {
+                    print("Confirm Placement Button Pressed")
+                    let modelAnchor = ModelAnchor(model: model, anchor: nil)
+                    placementSettings.modelsConfirmedForPlacement.append(modelAnchor)
+                    placementSettings.selectedTool = .none
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .background(Color.black.opacity(0.38))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22)
+                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 22))
+            .padding(.horizontal, 18)
+            .padding(.bottom, 18)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 22))
-        .padding(.horizontal, 18)
-        .padding(.bottom, 18)
     }
 }
+
+// MARK: - Action Button
 
 private enum PlacementActionKind {
     case cancel
@@ -50,35 +67,35 @@ private struct PlacementActionButton: View {
 
     private var icon: String {
         switch kind {
-        case .cancel: return "xmark"
+        case .cancel:  return "xmark"
         case .confirm: return "checkmark"
         }
     }
 
     private var title: String {
         switch kind {
-        case .cancel: return "Cancel"
+        case .cancel:  return "Cancel"
         case .confirm: return "Place"
         }
     }
 
     private var bg: Color {
         switch kind {
-        case .cancel: return Color.white.opacity(0.06)
+        case .cancel:  return Color.white.opacity(0.06)
         case .confirm: return Color("MintGreen")
         }
     }
 
     private var fg: Color {
         switch kind {
-        case .cancel: return Color.white.opacity(0.92)
+        case .cancel:  return Color.white.opacity(0.92)
         case .confirm: return Color.black.opacity(0.92)
         }
     }
 
     private var stroke: Color {
         switch kind {
-        case .cancel: return Color("MintGreen").opacity(0.16)
+        case .cancel:  return Color("MintGreen").opacity(0.16)
         case .confirm: return Color("MintGreen").opacity(0.25)
         }
     }
