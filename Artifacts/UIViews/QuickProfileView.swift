@@ -11,6 +11,7 @@ import CoreLocation
 import UIKit
 import FirebaseAuth
 import FirebaseFirestore
+import FirebaseStorage
 
 struct QuickProfileView: View {
     @EnvironmentObject var session: SessionManager
@@ -31,6 +32,14 @@ struct QuickProfileView: View {
     @State private var selectedArtifact: ArtifactMapItem?
     @State private var didAutoCenter = false
 
+    // Profile photo
+    @State private var profileImageURL: String? = nil
+    @State private var selectedProfileImage: UIImage? = nil
+    @State private var showImagePicker = false
+    @State private var isUploadingProfileImage = false
+    @State private var uploadErrorMessage: String? = nil
+    @State private var showUploadErrorAlert = false
+
     @State private var region = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 30.2672, longitude: -97.7431),
         span: MKCoordinateSpan(latitudeDelta: 0.03, longitudeDelta: 0.03)
@@ -43,7 +52,7 @@ struct QuickProfileView: View {
     private var hasArtifacts: Bool { !artifacts.isEmpty }
 
     var body: some View {
-        GeometryReader { geo in
+        GeometryReader { _ in
             ZStack {
                 ProfileBackground()
                     .ignoresSafeArea()
@@ -81,7 +90,21 @@ struct QuickProfileView: View {
                 .presentationDetents([.medium])
                 .presentationBackground(.black)
         }
+        .sheet(isPresented: $showImagePicker) {
+            ImagePicker(image: $selectedProfileImage)
+                .ignoresSafeArea()
+        }
+        .onChange(of: selectedProfileImage) { newImage in
+            guard let newImage else { return }
+            uploadProfileImage(newImage)
+        }
+        .alert("Profile Photo Upload Failed", isPresented: $showUploadErrorAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(uploadErrorMessage ?? "An unknown error occurred.")
+        }
         .onAppear {
+            profileImageURL = (session.userData?["profilePictureURL"] as? String)
             startFriendsListener()
             startArtifactsListener()
         }
@@ -89,30 +112,73 @@ struct QuickProfileView: View {
             friendsListener?.remove()
             artifactsListener?.remove()
         }
+        .onChange(of: session.userData?["profilePictureURL"] as? String) { newValue in
+            profileImageURL = newValue
+        }
     }
 
     private var header: some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Color.white.opacity(0.06))
-                    .frame(width: 54, height: 54)
-                    .overlay(
-                        Circle()
-                            .stroke(Color("MintGreen").opacity(0.28), lineWidth: 1)
-                    )
 
-                Image(systemName: "person.fill")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(Color("MintGreen").opacity(0.92))
+            Button {
+                showImagePicker = true
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(0.06))
+                        .frame(width: 54, height: 54)
+                        .overlay(
+                            Circle()
+                                .stroke(Color("MintGreen").opacity(0.28), lineWidth: 1)
+                        )
+
+                    if let selectedProfileImage {
+                        Image(uiImage: selectedProfileImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 54, height: 54)
+                            .clipShape(Circle())
+                    } else if let urlString = profileImageURL, let url = URL(string: urlString) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .empty:
+                                ProgressView()
+                                    .tint(Color("MintGreen"))
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .scaledToFill()
+                            default:
+                                Image(systemName: "person.fill")
+                                    .font(.system(size: 22, weight: .bold))
+                                    .foregroundColor(Color("MintGreen").opacity(0.92))
+                            }
+                        }
+                        .frame(width: 54, height: 54)
+                        .clipShape(Circle())
+                    } else {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundColor(Color("MintGreen").opacity(0.92))
+                    }
+
+                    if isUploadingProfileImage {
+                        Circle()
+                            .fill(Color.black.opacity(0.45))
+                            .frame(width: 54, height: 54)
+                        ProgressView()
+                            .tint(.white)
+                    }
+                }
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Change profile photo")
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("@\(username)")
                     .font(.custom("Poppins-Bold", size: 20))
                     .foregroundColor(Color.white.opacity(0.92))
 
-                // Optional: show email if you want a second line that is actually useful.
                 if let email = session.user?.email, !email.isEmpty {
                     Text(email)
                         .font(.custom("Poppins-Regular", size: 12))
@@ -292,6 +358,84 @@ struct QuickProfileView: View {
             }
         } catch {
             print("⚠️ listenMyArtifacts failed:", error)
+        }
+    }
+
+    private func uploadProfileImage(_ image: UIImage) {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            uploadErrorMessage = "You must be signed in to upload a profile photo."
+            showUploadErrorAlert = true
+            return
+        }
+
+        guard !isUploadingProfileImage else { return }
+        isUploadingProfileImage = true
+        uploadErrorMessage = nil
+
+        guard let data = image.jpegData(compressionQuality: 0.82) else {
+            isUploadingProfileImage = false
+            uploadErrorMessage = "Unable to process the selected image."
+            showUploadErrorAlert = true
+            return
+        }
+
+        let ref = Storage.storage().reference(withPath: "users/\(uid)/profile.jpg")
+        let metadata = StorageMetadata()
+        metadata.contentType = "image/jpeg"
+
+        ref.putData(data, metadata: metadata) { _, error in
+            if let error {
+                DispatchQueue.main.async {
+                    self.isUploadingProfileImage = false
+                    self.uploadErrorMessage = error.localizedDescription
+                    self.showUploadErrorAlert = true
+                }
+                return
+            }
+
+            ref.downloadURL { url, error in
+                if let error {
+                    DispatchQueue.main.async {
+                        self.isUploadingProfileImage = false
+                        self.uploadErrorMessage = error.localizedDescription
+                        self.showUploadErrorAlert = true
+                    }
+                    return
+                }
+
+                guard let url else {
+                    DispatchQueue.main.async {
+                        self.isUploadingProfileImage = false
+                        self.uploadErrorMessage = "Could not get download URL."
+                        self.showUploadErrorAlert = true
+                    }
+                    return
+                }
+
+                let urlString = url.absoluteString
+
+                Firestore.firestore().collection("users").document(uid).setData([
+                    "profilePictureURL": urlString,
+                    "lastActive": Timestamp(date: Date())
+                ], merge: true) { error in
+                    DispatchQueue.main.async {
+                        self.isUploadingProfileImage = false
+
+                        if let error {
+                            self.uploadErrorMessage = error.localizedDescription
+                            self.showUploadErrorAlert = true
+                            return
+                        }
+
+                        self.profileImageURL = urlString
+
+                        // Update session.userData locally (fetchUserData is private in SessionManager)
+                        var updated = self.session.userData ?? [:]
+                        updated["profilePictureURL"] = urlString
+                        self.session.userData = updated
+                    }
+                }
+            }
         }
     }
 }
