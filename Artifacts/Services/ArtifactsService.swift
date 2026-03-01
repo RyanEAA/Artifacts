@@ -9,6 +9,7 @@ import Foundation
 import FirebaseFirestore
 import FirebaseAuth
 import CoreLocation
+import simd
 
 struct ArtifactMapItem: Identifiable, Equatable {
     let id: String
@@ -24,7 +25,12 @@ struct ArtifactMapItem: Identifiable, Equatable {
 }
 
 final class ArtifactsService {
+
+    static let shared = ArtifactsService()
+
     private let db = Firestore.firestore()
+
+    private init() {}
 
     func listenMyArtifacts(completion: @escaping ([ArtifactMapItem]) -> Void) throws -> ListenerRegistration {
         guard let uid = Auth.auth().currentUser?.uid else {
@@ -51,12 +57,105 @@ final class ArtifactsService {
             }
     }
 
+    // MARK: Create
+
+    func createAnnotationArtifact(
+        artifactId: String,
+        annotationText: String,
+        sceneId: String,
+        transform: simd_float4x4
+    ) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "ArtifactsService", code: 401, userInfo: [
+                NSLocalizedDescriptionKey: "User is not authenticated"
+            ])
+        }
+
+        let position = Self.positionArray(from: transform)
+        let transformArray = Self.transformArray(from: transform)
+
+        let doc: [String: Any] = [
+            "id": artifactId,
+            "ownerUid": uid,
+            "sceneId": sceneId,
+            "type": "annotation",
+            "annotationText": annotationText,
+            "position": position,
+            "transform": transformArray,
+            "createdAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+
+        try await db.collection("artifacts").document(artifactId).setData(doc, merge: true)
+    }
+
+    func updateAnnotationText(
+        artifactId: String,
+        annotationText: String
+    ) async throws {
+        let patch: [String: Any] = [
+            "annotationText": annotationText,
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        try await db.collection("artifacts").document(artifactId).setData(patch, merge: true)
+    }
+
+    func createModelArtifact(
+        artifactId: String,
+        modelName: String,
+        sceneId: String,
+        transform: simd_float4x4
+    ) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "ArtifactsService", code: 401, userInfo: [
+                NSLocalizedDescriptionKey: "User is not authenticated"
+            ])
+        }
+
+        let position = Self.positionArray(from: transform)
+        let transformArray = Self.transformArray(from: transform)
+
+        let doc: [String: Any] = [
+            "id": artifactId,
+            "ownerUid": uid,
+            "sceneId": sceneId,
+            "type": "model",
+            "modelName": modelName,
+            "position": position,
+            "transform": transformArray,
+            "createdAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+
+        try await db.collection("artifacts").document(artifactId).setData(doc, merge: true)
+    }
+
+    // MARK: Helpers
+
+    private static func positionArray(from transform: simd_float4x4) -> [Double] {
+        [
+            Double(transform.columns.3.x),
+            Double(transform.columns.3.y),
+            Double(transform.columns.3.z)
+        ]
+    }
+
+    private static func transformArray(from transform: simd_float4x4) -> [Double] {
+        [
+            Double(transform.columns.0.x), Double(transform.columns.0.y), Double(transform.columns.0.z), Double(transform.columns.0.w),
+            Double(transform.columns.1.x), Double(transform.columns.1.y), Double(transform.columns.1.z), Double(transform.columns.1.w),
+            Double(transform.columns.2.x), Double(transform.columns.2.y), Double(transform.columns.2.z), Double(transform.columns.2.w),
+            Double(transform.columns.3.x), Double(transform.columns.3.y), Double(transform.columns.3.z), Double(transform.columns.3.w)
+        ]
+    }
+
     private static func decodeArtifact(docId: String, data: [String: Any]) -> ArtifactMapItem? {
         let ownerUid = data["ownerUid"] as? String ?? ""
         let sceneId = data["sceneId"] as? String ?? ""
         let title = data["title"] as? String
             ?? data["name"] as? String
             ?? data["label"] as? String
+            ?? data["modelName"] as? String
             ?? "Artifact"
 
         let createdAt = (data["createdAt"] as? Timestamp)?.dateValue()

@@ -11,8 +11,6 @@ import RealityKit
 import ARKit
 import UIKit
 
-// MARK: - Annotation Data Model
-
 extension ARViewContainer {
 
     struct AnnotationData: Codable {
@@ -21,13 +19,43 @@ extension ARViewContainer {
     }
 }
 
-// MARK: - Annotation Helpers
-
 extension ARViewContainer {
 
-    // MARK: Factory
+    private func currentSceneIdForArtifacts() -> String {
+        self.sceneManager.selectedCloudSceneId ?? ""
+    }
 
-    /// Builds a styled UITextView that matches the AnnotationsView appearance.
+    private func saveAnnotationToFirestore(annotationId: UUID, text: String, transform: simd_float4x4) {
+        let sceneId = currentSceneIdForArtifacts()
+        let artifactId = annotationId.uuidString
+        Task {
+            do {
+                try await ArtifactsService.shared.createAnnotationArtifact(
+                    artifactId: artifactId,
+                    annotationText: text,
+                    sceneId: sceneId,
+                    transform: transform
+                )
+            } catch {
+                print("⚠️ createAnnotationArtifact error:", error.localizedDescription)
+            }
+        }
+    }
+
+    private func updateAnnotationTextInFirestore(annotationId: UUID, text: String) {
+        let artifactId = annotationId.uuidString
+        Task {
+            do {
+                try await ArtifactsService.shared.updateAnnotationText(
+                    artifactId: artifactId,
+                    annotationText: text
+                )
+            } catch {
+                print("⚠️ updateAnnotationText error:", error.localizedDescription)
+            }
+        }
+    }
+
     func makeTextView(id: UUID, text: String) -> UITextView {
         let tv = UITextView(frame: .zero)
         let isEmpty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -48,9 +76,6 @@ extension ARViewContainer {
         return tv
     }
 
-    // MARK: Attach
-
-    /// Creates and adds the UITextView for an ARAnchor to both the view and SceneManager.
     func attachAnnotationView(for anchor: ARAnchor, data: AnnotationData, on arView: ARView) {
         if self.sceneManager.annotationViews[data.id] != nil { return }
         let tv = makeTextView(id: data.id, text: data.text)
@@ -58,17 +83,14 @@ extension ARViewContainer {
             tv.delegate = coord
         }
         arView.addSubview(tv)
-        self.sceneManager.annotationViews[data.id]  = tv
+        self.sceneManager.annotationViews[data.id] = tv
         self.sceneManager.annotationAnchors[data.id] = anchor
-        self.sceneManager.isEditing[data.id]         = false
+        self.sceneManager.isEditing[data.id] = false
         let hasText = !data.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        self.sceneManager.hasBeenTapped[data.id]     = hasText
+        self.sceneManager.hasBeenTapped[data.id] = hasText
         animatePopIn(tv)
     }
 
-    // MARK: Layout (called every frame)
-
-    /// Projects world-space anchor positions and repositions UITextViews + delete buttons.
     func layoutAnnotations(on arView: ARView) {
         guard let frame = arView.session.currentFrame else { return }
         for (id, anchor) in self.sceneManager.annotationAnchors {
@@ -93,13 +115,11 @@ extension ARViewContainer {
                     }
                 }
             } else {
-                self.sceneManager.annotationViews[id]?.isHidden   = true
+                self.sceneManager.annotationViews[id]?.isHidden = true
                 self.sceneManager.deleteButtons[id]?.isHidden = true
             }
         }
     }
-
-    // MARK: Encode / Decode (Cloud persistence payload)
 
     func encodeAnnotation(_ data: AnnotationData) -> String {
         if let d = try? JSONEncoder().encode(data) {
@@ -113,12 +133,10 @@ extension ARViewContainer {
         return try? JSONDecoder().decode(AnnotationData.self, from: d)
     }
 
-    // MARK: Placement Helpers
-
-    /// Places an annotation at the screen center (triggered from the browse sheet).
     func placePendingAnnotationIfNeeded(on arView: ARView) {
         guard let text = self.sceneManager.pendingAnnotationText else { return }
         guard let transform = getTransformForPlacement(in: arView) else { return }
+
         let id = UUID()
         let payload = AnnotationData(id: id, text: text)
         let name = annotationNamePrefix + encodeAnnotation(payload)
@@ -127,14 +145,18 @@ extension ARViewContainer {
         attachAnnotationView(for: anchor, data: payload, on: arView)
         self.sceneManager.hasBeenTapped[id] = false
         self.sceneManager.pendingAnnotationText = nil
+
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        saveAnnotationToFirestore(annotationId: id, text: trimmed, transform: transform)
     }
 
-    /// Places an annotation at an arbitrary tap point.
     func placeAnnotation(at point: CGPoint, on arView: ARView) {
         let rawText = (self.sceneManager.pendingAnnotationText?
             .trimmingCharacters(in: .whitespacesAndNewlines))
             .flatMap { $0.isEmpty ? nil : $0 } ?? "Tap to Edit"
+
         guard let transform = getTransformForPlacement(in: arView, at: point) else { return }
+
         let id = UUID()
         let payload = AnnotationData(id: id, text: rawText == "Tap to Edit" ? "" : rawText)
         let name = annotationNamePrefix + encodeAnnotation(payload)
@@ -144,9 +166,10 @@ extension ARViewContainer {
         self.sceneManager.hasBeenTapped[id] = (rawText != "Tap to Edit")
         self.sceneManager.pendingAnnotationText = nil
         self.placementSettings.selectedTool = .none
-    }
 
-    // MARK: Delete Button
+        let trimmed = payload.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        saveAnnotationToFirestore(annotationId: id, text: trimmed, transform: transform)
+    }
 
     func showDeleteButton(for id: UUID, on arView: ARView) {
         guard let tv = self.sceneManager.annotationViews[id] else { return }
@@ -177,8 +200,6 @@ extension ARViewContainer {
     func hideDeleteButton(for id: UUID) {
         self.sceneManager.deleteButtons[id]?.isHidden = true
     }
-
-    // MARK: Animations
 
     func animatePopIn(_ view: UIView) {
         view.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)

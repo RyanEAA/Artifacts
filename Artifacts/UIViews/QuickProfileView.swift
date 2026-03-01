@@ -17,8 +17,8 @@ struct QuickProfileView: View {
     @EnvironmentObject var session: SessionManager
     @EnvironmentObject var friendsService: FriendsService
 
-    private let artifactsService = ArtifactsService()
-
+    private let artifactsService = ArtifactsService.shared
+    
     @State private var friendCount: Int = 0
     @State private var friends: [String] = []
     @State private var friendsListener: ListenerRegistration?

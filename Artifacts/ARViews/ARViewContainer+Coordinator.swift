@@ -9,6 +9,7 @@
 import RealityKit
 import ARKit
 import UIKit
+import FirebaseFirestore
 
 extension ARViewContainer {
 
@@ -16,6 +17,8 @@ extension ARViewContainer {
 
         var parent: ARViewContainer
         weak var arView: ARView?
+
+        private let db = Firestore.firestore()
 
         init(_ parent: ARViewContainer) {
             self.parent = parent
@@ -41,6 +44,7 @@ extension ARViewContainer {
                         parent.attachAnnotationView(for: anchor, data: data, on: arView)
                     }
                 }
+
                 // Model anchors
                 if let anchorName = anchor.name, anchorName.hasPrefix(anchorNamePrefix) {
                     let modelName = anchorName.dropFirst(anchorNamePrefix.count)
@@ -78,25 +82,38 @@ extension ARViewContainer {
 
         @objc func handleDeleteButton(_ sender: UIButton) {
             guard let arView = arView else { return }
+
             guard let (id, _) = parent.sceneManager.deleteButtons
                 .first(where: { $0.value === sender }) else {
                 parent.animatePopOut(sender) { sender.removeFromSuperview() }
                 return
             }
+
             if let tv = parent.sceneManager.annotationViews[id] {
-                parent.animatePopOut(tv)     { tv.removeFromSuperview()     }
+                parent.animatePopOut(tv) { tv.removeFromSuperview() }
                 parent.animatePopOut(sender) { sender.removeFromSuperview() }
             } else {
                 parent.animatePopOut(sender) { sender.removeFromSuperview() }
             }
+
             if let anchor = parent.sceneManager.annotationAnchors[id] {
                 arView.session.remove(anchor: anchor)
             }
-            parent.sceneManager.annotationViews[id]   = nil
-            parent.sceneManager.deleteButtons[id]     = nil
+
+            parent.sceneManager.annotationViews[id] = nil
+            parent.sceneManager.deleteButtons[id] = nil
             parent.sceneManager.annotationAnchors[id] = nil
-            parent.sceneManager.isEditing[id]         = nil
-            parent.sceneManager.hasBeenTapped[id]     = nil
+            parent.sceneManager.isEditing[id] = nil
+            parent.sceneManager.hasBeenTapped[id] = nil
+
+            // Delete the Firestore artifact for this annotation
+            // Annotation artifact ids are stored as UUID strings
+            let artifactId = id.uuidString
+            db.collection("artifacts").document(artifactId).delete { error in
+                if let error {
+                    print("⚠️ Firestore delete annotation artifact error:", error.localizedDescription)
+                }
+            }
         }
 
         // MARK: - Tap Gesture (Annotation Placement & Editing)
@@ -105,10 +122,10 @@ extension ARViewContainer {
             guard let arView = gesture.view as? ARView else { return }
             let location = gesture.location(in: arView)
 
-            // If a 3D model tool is active, PlacementView handles confirm/cancel — ignore taps here
+            // If a 3D model tool is active, PlacementView handles confirm/cancel
             if case .model = parent.placementSettings.selectedTool { return }
 
-            // 1) Tap hits an existing annotation → enter edit mode
+            // 1) Tap hits an existing annotation, enter edit mode
             for (id, tv) in parent.sceneManager.annotationViews {
                 if tv.frame.contains(location) {
                     parent.sceneManager.isEditing[id] = true
@@ -126,9 +143,10 @@ extension ARViewContainer {
                 }
             }
 
-            // 2) Some annotation is currently editing → end editing
+            // 2) Some annotation is currently editing, end editing
             if let editingId = parent.sceneManager.isEditing.first(where: { $0.value })?.key {
                 parent.sceneManager.isEditing[editingId] = false
+
                 if let tv = parent.sceneManager.annotationViews[editingId] {
                     tv.isEditable = false
                     tv.layer.borderWidth = 0
@@ -142,6 +160,7 @@ extension ARViewContainer {
                         parent.showDeleteButton(for: editingId, on: arView)
                     } else {
                         parent.hideDeleteButton(for: editingId)
+
                         if let oldAnchor = parent.sceneManager.annotationAnchors[editingId] {
                             let transform = oldAnchor.transform
                             let payload = ARViewContainer.AnnotationData(
@@ -154,17 +173,29 @@ extension ARViewContainer {
                             arView.session.remove(anchor: oldAnchor)
                             parent.sceneManager.annotationAnchors[editingId] = newAnchor
                         }
+
+                        // Update Firestore text for this annotation artifact
+                        let artifactId = editingId.uuidString
+                        Task {
+                            do {
+                                try await ArtifactsService.shared.updateAnnotationText(
+                                    artifactId: artifactId,
+                                    annotationText: tv.text
+                                )
+                            } catch {
+                                print("⚠️ updateAnnotationText error:", error.localizedDescription)
+                            }
+                        }
                     }
                 }
                 return
             }
 
-            // 3) No annotation editing — dispatch based on selected tool
+            // 3) No annotation editing, dispatch based on selected tool
             switch parent.placementSettings.selectedTool {
             case .annotation:
                 parent.placeAnnotation(at: location, on: arView)
             case .model:
-                // Handled by PlacementView confirm button
                 return
             case .none:
                 return
