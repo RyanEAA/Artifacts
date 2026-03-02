@@ -21,10 +21,9 @@
                                 <color key="textColor" red="0.0" green="0.0" blue="0.0" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                                 <nil key="highlightedColor"/>
                             </label>
-                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" fixedFrame="YES" image="AppIcon" translatesAutoresizingMaskIntoConstraints="NO" id="le8-lf-Iif">
-                                <rect key="frame" x="0.0" y="257" width="393" height="338"/>
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" fixedFrame="YES" image="logo" translatesAutoresizingMaskIntoConstraints="NO" id="agD-Tg-V1x">
+                                <rect key="frame" x="31" y="286" width="362" height="281"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
-                                <color key="backgroundColor" red="0.066666662690000003" green="0.070588238540000001" blue="0.062745101750000004" alpha="1" colorSpace="custom" customColorSpace="displayP3"/>
                             </imageView>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="Bcu-3y-fUS"/>
@@ -42,6 +41,6 @@
         </scene>
     </scenes>
     <resources>
-        <image name="AppIcon" width="166.66667175292969" height="166.66667175292969"/>
+        <image name="logo" width="239.66667175292969" height="262.66665649414062"/>
     </resources>
 </document>
