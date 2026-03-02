@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { useNavigate } from "react-router-dom";
+import ArtifactsLogo from "../images/ArtifactsLogo.png";
 
 export default function Login() {
   const { login } = useAuth();
@@ -22,6 +23,13 @@ export default function Login() {
 
   return (
         <div className="flex justify-center items-center min-h-screen bg-background">
+        
+        <img
+          src={ArtifactsLogo}
+          alt="Logo"
+          className="w-32 mb-4"
+        />
+        
       <form onSubmit={handleSubmit} className="bg-surface p-8 rounded shadow w-96">
         <h2 className="text-white text-2xl mb-4">Admin Login</h2>
         {error && <p className="text-red-500 mb-2">{error}</p>}
@@ -46,7 +54,3 @@ export default function Login() {
     </div>
   );
 }
-
-
-
-
