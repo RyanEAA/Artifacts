@@ -55,6 +55,12 @@ struct ARViewContainer: UIViewRepresentable {
         )
         arView.addGestureRecognizer(tap)
 
+        // Drawing: install pan gesture (disabled by default; enabled when tool == .draw)
+        installDrawingGesture(on: arView, coordinator: context.coordinator)
+
+        // Drawing: wire undo/clear notifications posted by DrawingToolbarView
+        context.coordinator.subscribeToDrawingNotifications(arView: arView)
+
         // Update loop for models + persistence
         self.placementSettings.sceneObserver = arView.scene.subscribe(
             to: SceneEvents.Update.self
@@ -69,7 +75,17 @@ struct ARViewContainer: UIViewRepresentable {
         return arView
     }
 
-    func updateUIView(_ uiView: CustomARView, context: Context) { }
+    func updateUIView(_ uiView: CustomARView, context: Context) {
+        // Sync draw gesture enabled/disabled state whenever selectedTool changes
+        let isDrawing: Bool
+        if case .draw = placementSettings.selectedTool { isDrawing = true } else { isDrawing = false }
+        context.coordinator.drawPanGesture?.isEnabled = isDrawing
+
+        // Disable tap recognizer while drawing so finger-drag doesn't fire it
+        uiView.gestureRecognizers?
+            .compactMap { $0 as? UITapGestureRecognizer }
+            .forEach { $0.isEnabled = !isDrawing }
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)

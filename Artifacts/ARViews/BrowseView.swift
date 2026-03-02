@@ -49,36 +49,112 @@ struct BrowseView: View {
     }
 }
 
+// MARK: - Tool definitions
+// To add a new tool (e.g. Draw), append an ARTool entry to arTools below.
+
+private struct ARTool {
+    let title: String
+    let icon: String        // SF Symbol name
+    let accentColor: Color
+    let tool: PlacementTool
+}
+
+private let arTools: [ARTool] = [
+    ARTool(
+        title: "Annotate",
+        icon: "text.bubble.fill",
+        accentColor: Color("MintGreen"),
+        tool: .annotation
+    ),
+    ARTool(
+        title: "Draw",
+        icon: "scribble.variable",
+        accentColor: Color("MintGreen"),
+        tool: .draw
+    ),
+]
+
 struct AnnotationToolButton: View {
     @EnvironmentObject var placementSettings: PlacementSettings
     @Binding var showBrowse: Bool
-    
+
+    private let gridLayout = [GridItem(.fixed(150))]
+
     var body: some View {
-        VStack(alignment: .leading) {
-
-            Spacer()
-
+        VStack(alignment: .leading, spacing: 12) {
             Text("Tools")
-                .font(.title2).bold()
-                .padding(.leading, 22)
+                .font(.custom("Poppins-SemiBold", size: 18))
+                .foregroundColor(Color.white.opacity(0.92))
+                .padding(.horizontal, 18)
 
-            Button(action: {
-                placementSettings.selectedTool = .annotation
-                showBrowse = false
-            }) {
-                HStack {
-                    Image(systemName: "text.bubble.fill")
-                        .font(.largeTitle)
-
-                    Text("Annotation")
-                        .font(.headline)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHGrid(rows: gridLayout, spacing: 14) {
+                    ForEach(arTools, id: \.title) { arTool in
+                        ToolCard(tool: arTool) {
+                            placementSettings.selectedTool = arTool.tool
+                            showBrowse = false
+                        }
+                    }
                 }
-                .padding()
-//                .background(Color.secondarySystemFill)
-                .cornerRadius(10)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
             }
-            .padding(.horizontal, 22)
         }
+        .padding(.top, 4)
+    }
+}
+
+/// Matches the exact look of ItemButton — 150x150 card with icon, gradient, and label.
+private struct ToolCard: View {
+    let tool: ARTool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .bottomLeading) {
+                // Background: dark glass with subtle accent tint
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(tool.accentColor.opacity(0.08))
+                    )
+                    .frame(width: 150, height: 150)
+
+                // Large centred icon
+                Image(systemName: tool.icon)
+                    .font(.system(size: 52, weight: .medium))
+                    .foregroundColor(tool.accentColor.opacity(0.88))
+                    .frame(width: 150, height: 150)
+
+                // Bottom gradient + label — identical to ItemButton
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color.black.opacity(0.65),
+                        Color.black.opacity(0.00)
+                    ]),
+                    startPoint: .bottom,
+                    endPoint: .center
+                )
+                .frame(width: 150, height: 150)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+
+                Text(tool.title)
+                    .font(.custom("Poppins-SemiBold", size: 12))
+                    .foregroundColor(Color.white.opacity(0.92))
+                    .lineLimit(1)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
+            }
+            .frame(width: 150, height: 150)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(tool.accentColor.opacity(0.22), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.40), radius: 14, x: 0, y: 10)
+        }
+        .buttonStyle(.plain)
     }
 }
 

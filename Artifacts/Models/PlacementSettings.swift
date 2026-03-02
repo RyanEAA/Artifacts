@@ -14,6 +14,7 @@ enum PlacementTool {
     case none
     case model(Model)
     case annotation
+    case draw
 }
 
 struct ModelAnchor {

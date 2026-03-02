@@ -3,7 +3,7 @@
 //  ARTutorial
 //
 //  Observable state container for the AR scene, including persistence flags,
-//  anchor entities, and all 2D annotation state.
+//  anchor entities, 2D annotation state, and drawing state.
 //
 
 import Foundation
@@ -73,6 +73,15 @@ class SceneManager: ObservableObject {
 
     /// Scene-update subscription that drives `layoutAnnotations`.
     var annotationsSceneObserver: Cancellable?
+
+    // MARK: Drawing State
+
+    /// Owns brush color, brush size, stroke history, and undo logic.
+    var drawingManager: DrawingManager = DrawingManager()
+
+    /// Single world-space anchor that parents all draw bead entities.
+    /// Created lazily on the first bead placed.
+    var drawAnchorEntity: AnchorEntity? = nil
 
     // MARK: Helpers
 

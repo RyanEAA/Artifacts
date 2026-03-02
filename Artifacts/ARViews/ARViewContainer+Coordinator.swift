@@ -3,7 +3,8 @@
 //  ARTutorial
 //
 //  Coordinator handles ARSessionDelegate callbacks, UITextViewDelegate
-//  callbacks, gesture recognition, and delete-button events.
+//  callbacks, gesture recognition, delete-button events, and drawing
+//  notification subscriptions.
 //
 
 import RealityKit
@@ -17,8 +18,25 @@ extension ARViewContainer {
         var parent: ARViewContainer
         weak var arView: ARView?
 
+        /// Retained reference to the draw pan gesture so ARViewContainer
+        /// can enable/disable it from updateUIView.
+        var drawPanGesture: UIPanGestureRecognizer?
+
+        /// Tracks the current finger screen position while drawing.
+        /// Set by handleDrawPan; consumed by tickDrawing on every AR frame.
+        var currentFingerPosition: CGPoint? = nil
+
+        /// Notification observers retained for the lifetime of the coordinator.
+        var notificationObservers: [NSObjectProtocol] = []
+
         init(_ parent: ARViewContainer) {
             self.parent = parent
+        }
+
+        deinit {
+            notificationObservers.forEach {
+                NotificationCenter.default.removeObserver($0)
+            }
         }
 
         // MARK: - ARSessionDelegate: Collaboration
@@ -67,6 +85,14 @@ extension ARViewContainer {
             }
         }
 
+        // MARK: - ARSessionDelegate: Frame Update (drives smooth drawing)
+
+        func session(_ session: ARSession, didUpdate frame: ARFrame) {
+            DispatchQueue.main.async {
+                self.tickDrawing(frame: frame)
+            }
+        }
+
         // MARK: - Delete Button
 
         func registerDeleteButton(_ button: UIButton, for id: UUID) {
@@ -105,8 +131,11 @@ extension ARViewContainer {
             guard let arView = gesture.view as? ARView else { return }
             let location = gesture.location(in: arView)
 
-            // If a 3D model tool is active, PlacementView handles confirm/cancel — ignore taps here
+            // If a 3D model tool is active, PlacementView handles confirm/cancel
             if case .model = parent.placementSettings.selectedTool { return }
+
+            // Draw tool is active — tap does nothing (pan gesture handles drawing)
+            if case .draw = parent.placementSettings.selectedTool { return }
 
             // 1) Tap hits an existing annotation → enter edit mode
             for (id, tv) in parent.sceneManager.annotationViews {
@@ -163,10 +192,7 @@ extension ARViewContainer {
             switch parent.placementSettings.selectedTool {
             case .annotation:
                 parent.placeAnnotation(at: location, on: arView)
-            case .model:
-                // Handled by PlacementView confirm button
-                return
-            case .none:
+            case .model, .draw, .none:
                 return
             }
         }

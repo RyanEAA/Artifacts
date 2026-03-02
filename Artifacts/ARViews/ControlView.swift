@@ -145,11 +145,11 @@ struct ControlView: View {
     @Binding var isControlsVisible: Bool
     @Binding var showBrowse: Bool
     @Binding var showSettings: Bool
-    @State private var showProfile=false
+    @State private var showProfile = false
+
     var body: some View {
-        VStack{
+        VStack {
             HStack {
-                // add button to show ProfileView()
                 if isControlsVisible {
                     ProfileViewButton(isProfileVisible: $showProfile)
                         .sheet(isPresented: $showProfile) {
@@ -158,16 +158,18 @@ struct ControlView: View {
                                 .presentationBackground(.black)
                         }
                 }
-
                 Spacer()
                 ControlVisibilityToggleButton(isControlsVisible: $isControlsVisible)
-                
             }
             Spacer()
             if isControlsVisible {
                 ControlModePicker(selectedControlMode: $selectedControlMode)
-                //ControlButtonBar(showBrowse: $showBrowse, showSettings: //$showSettings, selectedControlMode: selectedControlMode)
-                ControlButtonBar(showBrowse: $showBrowse, showSettings: $showSettings, showProfile: $showProfile, selectedControlMode: selectedControlMode)
+                ControlButtonBar(
+                    showBrowse: $showBrowse,
+                    showSettings: $showSettings,
+                    showProfile: $showProfile,
+                    selectedControlMode: $selectedControlMode
+                )
             }
         }
     }
@@ -234,43 +236,47 @@ struct ProfileViewButton: View{
 
 struct ControlModePicker: View {
     @Binding var selectedControlMode: Int
-    
-    let controlModes = ControlModes.allCases
-    
-    init(selectedControlMode: Binding<Int>) {
-        self._selectedControlMode = selectedControlMode
 
-        UISegmentedControl.appearance().selectedSegmentTintColor = UIColor(Color("MintGreen"))
-        UISegmentedControl.appearance().setTitleTextAttributes([
-            .foregroundColor: UIColor.black,
-            .font: UIFont.systemFont(ofSize: 13, weight: .semibold)
-        ], for: .selected)
-        UISegmentedControl.appearance().setTitleTextAttributes([
-            .foregroundColor: UIColor.white,
-            .font: UIFont.systemFont(ofSize: 13, weight: .semibold)
-        ], for: .normal)
-        UISegmentedControl.appearance().backgroundColor = UIColor(Color.black.opacity(0.55))
-
-    }
-    
     var body: some View {
-        Picker(selection: $selectedControlMode, label: Text("Select a Control Mode")) {
-            ForEach(0..<controlModes.count) { index in
-                Text(self.controlModes[index].rawValue.uppercased()).tag(index)
-                
-            }
+        HStack(spacing: 0) {
+            ModeTab(label: "BROWSE", index: 0, selectedControlMode: $selectedControlMode)
+            ModeTab(label: "SCENE",  index: 1, selectedControlMode: $selectedControlMode)
         }
-        .pickerStyle(SegmentedPickerStyle())
         .frame(maxWidth: 400)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color.black.opacity(0.35))
+        .padding(4)
+        .background(Color.black.opacity(0.55))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .stroke(Color("MintGreen").opacity(0.14), lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        
+    }
+}
+
+private struct ModeTab: View {
+    let label: String
+    let index: Int
+    @Binding var selectedControlMode: Int
+
+    private var isSelected: Bool { selectedControlMode == index }
+
+    var body: some View {
+        Button {
+            print("ControlModePicker: tapped \(label) → selectedControlMode = \(index)")
+            selectedControlMode = index
+        } label: {
+            Text(label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(isSelected ? .black : .white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background(
+                    isSelected ? Color("MintGreen") : Color.clear
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .animation(.easeInOut(duration: 0.15), value: isSelected)
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -278,17 +284,20 @@ struct ControlButtonBar: View{
     @Binding var showBrowse: Bool
     @Binding var showSettings: Bool
     @Binding var showProfile: Bool
-    var selectedControlMode: Int
+    @Binding var selectedControlMode: Int
     
     var body: some View {
+        let _ = print("ControlButtonBar: rendering with selectedControlMode = \(selectedControlMode)")
         HStack(alignment: .center) {
             if selectedControlMode == 1 {
+                let _ = print("ControlButtonBar: showing SceneButtons")
                 SceneButtons()
             } else {
+                let _ = print("ControlButtonBar: showing BrowseButtons")
                 //BrowseButtons(showBrowse: $showBrowse, showSettings: $showSettings)
                 BrowseButtons(showBrowse: $showBrowse,
                                               showSettings: $showSettings,
-                                             showProfile: $showProfile)
+                              showProfile: $showProfile)
             }
         }
         .frame(maxWidth: 500)
@@ -362,6 +371,7 @@ struct MostRecentlyPlacedButton: View{
 
     }
 }
+
 extension Notification.Name {
     static let clearAllAnnotations = Notification.Name("ClearAllAnnotationsNotification")
 }

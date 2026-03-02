@@ -26,12 +26,17 @@ struct ContentView: View {
             ARViewContainer()
                
             
-            if self.placementSettings.selectedModel != nil {
+            switch placementSettings.selectedTool {
+            case .model:
                 PlacementView()
-            } else if self.modelDeletionManager.entitySelectedForDeletion != nil {
-                DeletionView()
-            } else {
-                ControlView(selectedControlMode: $selectedControlMode, isControlsVisible: $isControlsVisible, showBrowse: $showBrowse, showSettings: $showSettings)
+            case .draw:
+                DrawingToolbarView()
+            default:
+                if self.modelDeletionManager.entitySelectedForDeletion != nil {
+                    DeletionView()
+                } else {
+                    ControlView(selectedControlMode: $selectedControlMode, isControlsVisible: $isControlsVisible, showBrowse: $showBrowse, showSettings: $showSettings)
+                }
             }
         }
         .edgesIgnoringSafeArea(.all)
