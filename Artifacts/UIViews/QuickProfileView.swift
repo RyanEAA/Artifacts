@@ -18,7 +18,7 @@ struct QuickProfileView: View {
     @EnvironmentObject var friendsService: FriendsService
 
     private let artifactsService = ArtifactsService.shared
-    
+
     @State private var friendCount: Int = 0
     @State private var friends: [String] = []
     @State private var friendsListener: ListenerRegistration?
@@ -59,9 +59,7 @@ struct QuickProfileView: View {
 
                 VStack(spacing: 14) {
                     header
-
                     statsRow
-
                     mapCard
                         .frame(maxWidth: .infinity)
                         .frame(maxHeight: .infinity)
@@ -255,6 +253,13 @@ struct QuickProfileView: View {
                         ArtifactPin(isSelected: selectedArtifact?.id == item.id)
                             .onTapGesture {
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                withAnimation(.easeInOut(duration: 0.30)) {
+                                    region.center = item.coordinate
+                                }
+                                openAppleMapsForArtifact(item)
+                            }
+                            .onLongPressGesture {
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                 selectedArtifact = item
                                 withAnimation(.easeInOut(duration: 0.30)) {
                                     region.center = item.coordinate
@@ -269,35 +274,36 @@ struct QuickProfileView: View {
                 )
 
                 if !hasArtifacts {
-                    HStack(spacing: 10) {
-                        Image(systemName: "sparkles")
-                            .foregroundColor(Color("MintGreen").opacity(0.92))
-                        Text("Place an artifact to see pins here")
-                            .font(.custom("Poppins-Regular", size: 13))
-                            .foregroundColor(Color.white.opacity(0.80))
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("No published artifacts yet")
+                            .font(.custom("Poppins-Bold", size: 14))
+                            .foregroundColor(Color.white.opacity(0.90))
+
+                        Text("Place artifacts and press Save to publish them to your map.")
+                            .font(.custom("Poppins-Regular", size: 12))
+                            .foregroundColor(Color.white.opacity(0.65))
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 12)
-                    .background(Color.black.opacity(0.60))
+                    .padding(12)
+                    .background(Color.black.opacity(0.52))
                     .overlay(
-                        Capsule()
-                            .stroke(Color("MintGreen").opacity(0.18), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.white.opacity(0.10), lineWidth: 1)
                     )
-                    .clipShape(Capsule())
+                    .cornerRadius(14)
                     .padding(12)
                 }
             }
-            .frame(maxWidth: .infinity)
-            .frame(maxHeight: .infinity)
+            .frame(height: 260)
         }
         .padding(14)
         .background(ProfileCardBackground())
         .overlay(
             RoundedRectangle(cornerRadius: 18)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(Color("MintGreen").opacity(0.12), lineWidth: 1)
         )
         .cornerRadius(18)
-        .shadow(color: Color.black.opacity(0.50), radius: 18, x: 0, y: 12)
+        .shadow(color: Color.black.opacity(0.55), radius: 18, x: 0, y: 12)
     }
 
     private var logoutBar: some View {
@@ -306,19 +312,19 @@ struct QuickProfileView: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "rectangle.portrait.and.arrow.right")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 14, weight: .bold))
                 Text("Log out")
-                    .font(.custom("Poppins-SemiBold", size: 16))
+                    .font(.custom("Poppins-SemiBold", size: 14))
             }
-            .foregroundColor(Color.white.opacity(0.90))
-            .padding(.vertical, 12)
+            .foregroundColor(Color.white.opacity(0.92))
             .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
             .background(Color.white.opacity(0.06))
             .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(Color.red.opacity(0.30), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
             )
-            .cornerRadius(14)
+            .cornerRadius(16)
         }
         .buttonStyle(.plain)
     }
@@ -344,7 +350,7 @@ struct QuickProfileView: View {
 
     private func startArtifactsListener() {
         do {
-            artifactsListener = try artifactsService.listenMyArtifacts { items in
+            artifactsListener = try artifactsService.listenMyPublishedArtifacts { items in
                 Task { @MainActor in
                     self.artifacts = items
 
@@ -357,8 +363,21 @@ struct QuickProfileView: View {
                 }
             }
         } catch {
-            print("⚠️ listenMyArtifacts failed:", error)
+            print("⚠️ listenMyPublishedArtifacts failed:", error)
         }
+    }
+
+    private func openAppleMapsForArtifact(_ item: ArtifactMapItem) {
+        let placemark = MKPlacemark(coordinate: item.coordinate)
+        let mapItem = MKMapItem(placemark: placemark)
+        mapItem.name = item.title
+
+        let launchOptions: [String: Any] = [
+            MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving,
+            MKLaunchOptionsShowsTrafficKey: true
+        ]
+
+        MKMapItem.openMaps(with: [mapItem], launchOptions: launchOptions)
     }
 
     private func uploadProfileImage(_ image: UIImage) {
@@ -429,7 +448,6 @@ struct QuickProfileView: View {
 
                         self.profileImageURL = urlString
 
-                        // Update session.userData locally (fetchUserData is private in SessionManager)
                         var updated = self.session.userData ?? [:]
                         updated["profilePictureURL"] = urlString
                         self.session.userData = updated

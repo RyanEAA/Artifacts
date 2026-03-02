@@ -2,8 +2,6 @@
 //  ARViewContainer+Scene.swift
 //  ARTutorial
 //
-//  Scene update loop, model placement, and raycast transform helpers.
-//
 
 import RealityKit
 import ARKit
@@ -24,6 +22,8 @@ extension ARViewContainer {
         let sceneId = currentSceneIdForArtifacts()
         let artifactId = UUID().uuidString
 
+        let coordinate = LocationService.shared.currentCoordinate
+
         print("🟩 Saving model artifact modelName:", modelName, "sceneId:", sceneId, "artifactId:", artifactId)
 
         Task {
@@ -32,7 +32,8 @@ extension ARViewContainer {
                     artifactId: artifactId,
                     modelName: modelName,
                     sceneId: sceneId,
-                    transform: transform
+                    transform: transform,
+                    coordinate: coordinate
                 )
                 print("✅ Saved model artifact:", artifactId)
             } catch {

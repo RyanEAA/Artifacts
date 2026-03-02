@@ -24,24 +24,38 @@ extension ARViewContainer {
             self.parent = parent
         }
 
-        // MARK: - ARSessionDelegate: Collaboration
-
         func session(_ session: ARSession,
                      didOutputCollaborationData data: ARSession.CollaborationData) {
             parent.collaborationManager.sendCollaborationData(data)
         }
 
-        // MARK: - ARSessionDelegate: Anchors Added
-
         func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
             guard let arView = arView else { return }
 
             for anchor in anchors {
+
                 // Annotation anchors
                 if let name = anchor.name, name.hasPrefix(annotationNamePrefix) {
                     let base64 = String(name.dropFirst(annotationNamePrefix.count))
                     if let data = parent.decodeAnnotation(from: base64) {
                         parent.attachAnnotationView(for: anchor, data: data, on: arView)
+
+                        // Firestore override: if we have newer text for this UUID, apply it.
+                        let artifactId = data.id.uuidString
+                        if let overrideText = parent.sceneManager.annotationTextOverrides[artifactId] {
+                            if let tv = parent.sceneManager.annotationViews[data.id] {
+                                let trimmed = overrideText.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if trimmed.isEmpty {
+                                    tv.text = "Tap to Edit"
+                                    parent.sceneManager.hasBeenTapped[data.id] = false
+                                    parent.showDeleteButton(for: data.id, on: arView)
+                                } else {
+                                    tv.text = overrideText
+                                    parent.sceneManager.hasBeenTapped[data.id] = true
+                                    parent.hideDeleteButton(for: data.id)
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -70,8 +84,6 @@ extension ARViewContainer {
                 }
             }
         }
-
-        // MARK: - Delete Button
 
         func registerDeleteButton(_ button: UIButton, for id: UUID) {
             button.addTarget(self,
@@ -106,8 +118,6 @@ extension ARViewContainer {
             parent.sceneManager.isEditing[id] = nil
             parent.sceneManager.hasBeenTapped[id] = nil
 
-            // Delete the Firestore artifact for this annotation
-            // Annotation artifact ids are stored as UUID strings
             let artifactId = id.uuidString
             db.collection("artifacts").document(artifactId).delete { error in
                 if let error {
@@ -116,16 +126,12 @@ extension ARViewContainer {
             }
         }
 
-        // MARK: - Tap Gesture (Annotation Placement & Editing)
-
         @objc func handleTapToPlaceAnnotation(_ gesture: UITapGestureRecognizer) {
             guard let arView = gesture.view as? ARView else { return }
             let location = gesture.location(in: arView)
 
-            // If a 3D model tool is active, PlacementView handles confirm/cancel
             if case .model = parent.placementSettings.selectedTool { return }
 
-            // 1) Tap hits an existing annotation, enter edit mode
             for (id, tv) in parent.sceneManager.annotationViews {
                 if tv.frame.contains(location) {
                     parent.sceneManager.isEditing[id] = true
@@ -143,7 +149,6 @@ extension ARViewContainer {
                 }
             }
 
-            // 2) Some annotation is currently editing, end editing
             if let editingId = parent.sceneManager.isEditing.first(where: { $0.value })?.key {
                 parent.sceneManager.isEditing[editingId] = false
 
@@ -174,7 +179,6 @@ extension ARViewContainer {
                             parent.sceneManager.annotationAnchors[editingId] = newAnchor
                         }
 
-                        // Update Firestore text for this annotation artifact
                         let artifactId = editingId.uuidString
                         Task {
                             do {
@@ -191,7 +195,6 @@ extension ARViewContainer {
                 return
             }
 
-            // 3) No annotation editing, dispatch based on selected tool
             switch parent.placementSettings.selectedTool {
             case .annotation:
                 parent.placeAnnotation(at: location, on: arView)
@@ -201,8 +204,6 @@ extension ARViewContainer {
                 return
             }
         }
-
-        // MARK: - UITextViewDelegate
 
         func textViewDidChange(_ textView: UITextView) {
             guard let arView = arView else { return }

@@ -12,3 +12,9 @@ extension UIApplication {
         sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }
+
+extension Notification.Name {
+    static let pauseARSession = Notification.Name("PauseARSessionNotification")
+    static let resumeARSession = Notification.Name("ResumeARSessionNotification")
+    static let clearAllAnnotations = Notification.Name("ClearAllAnnotationsNotification")
+}

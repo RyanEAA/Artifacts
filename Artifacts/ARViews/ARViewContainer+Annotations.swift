@@ -2,14 +2,11 @@
 //  ARViewContainer+Annotations.swift
 //  ARTutorial
 //
-//  Everything related to 2D UITextView-based annotations:
-//  creation, layout, encoding/decoding, show/hide delete button,
-//  pop animations, and pending-annotation placement.
-//
 
 import RealityKit
 import ARKit
 import UIKit
+import Foundation
 
 extension ARViewContainer {
 
@@ -22,19 +19,28 @@ extension ARViewContainer {
 extension ARViewContainer {
 
     private func currentSceneIdForArtifacts() -> String {
-        self.sceneManager.selectedCloudSceneId ?? ""
+        if let id = self.sceneManager.selectedCloudSceneId, !id.isEmpty {
+            return id
+        }
+        let newId = UUID().uuidString
+        self.sceneManager.selectedCloudSceneId = newId
+        return newId
     }
 
     private func saveAnnotationToFirestore(annotationId: UUID, text: String, transform: simd_float4x4) {
         let sceneId = currentSceneIdForArtifacts()
         let artifactId = annotationId.uuidString
+
+        let coordinate = LocationService.shared.currentCoordinate
+
         Task {
             do {
                 try await ArtifactsService.shared.createAnnotationArtifact(
                     artifactId: artifactId,
                     annotationText: text,
                     sceneId: sceneId,
-                    transform: transform
+                    transform: transform,
+                    coordinate: coordinate
                 )
             } catch {
                 print("⚠️ createAnnotationArtifact error:", error.localizedDescription)

@@ -4,9 +4,6 @@
 //
 //  Created by Ryan Aparicio on 10/23/25.
 //
-//  Entry point for the AR view. Responsible for creating and configuring
-//  the CustomARView and wiring up scene observers.
-//
 
 import Foundation
 import RealityKit
@@ -15,14 +12,20 @@ import ARKit
 import Combine
 import UIKit
 
-// MARK: - Constants (shared across all ARViewContainer files)
-
-let anchorNamePrefix    = "model-"
+let anchorNamePrefix = "model-"
 let annotationNamePrefix = "ann-"
-let annotationWidth: CGFloat  = 160
+let annotationWidth: CGFloat = 160
 let annotationHeight: CGFloat = 80
 
-// MARK: - ARViewContainer
+private extension CustomARView {
+    @objc func pauseFromNotification() {
+        self.session.pause()
+    }
+
+    @objc func resumeFromNotification() {
+        self.session.run(self.defaultCofiguration, options: [])
+    }
+}
 
 struct ARViewContainer: UIViewRepresentable {
     @EnvironmentObject var placementSettings: PlacementSettings
@@ -48,14 +51,14 @@ struct ARViewContainer: UIViewRepresentable {
             self.layoutAnnotations(on: arView)
         }
 
-        // Global tap recognizer: places/edits annotations when no model is selected
+        // Tap recognizer for annotations
         let tap = UITapGestureRecognizer(
             target: context.coordinator,
             action: #selector(Coordinator.handleTapToPlaceAnnotation(_:))
         )
         arView.addGestureRecognizer(tap)
 
-        // Update loop for models + persistence
+        // Update loop
         self.placementSettings.sceneObserver = arView.scene.subscribe(
             to: SceneEvents.Update.self
         ) { _ in
@@ -66,10 +69,30 @@ struct ARViewContainer: UIViewRepresentable {
 
         collaborationManager.session = arView.session
 
+        // Pause/Resume AR when profile sheet shows
+        NotificationCenter.default.addObserver(
+            arView,
+            selector: #selector(CustomARView.pauseFromNotification),
+            name: .pauseARSession,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            arView,
+            selector: #selector(CustomARView.resumeFromNotification),
+            name: .resumeARSession,
+            object: nil
+        )
+
         return arView
     }
 
     func updateUIView(_ uiView: CustomARView, context: Context) { }
+
+    static func dismantleUIView(_ uiView: CustomARView, coordinator: Coordinator) {
+        uiView.session.pause()
+        NotificationCenter.default.removeObserver(uiView, name: .pauseARSession, object: nil)
+        NotificationCenter.default.removeObserver(uiView, name: .resumeARSession, object: nil)
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)

@@ -2,17 +2,69 @@
 //  LocationService.swift
 //  Artifacts
 //
-//  Created by Swapnil Puri on 3/1/26.
-//
 
-import SwiftUI
+import Foundation
+import CoreLocation
 
-struct LocationService: View {
-    var body: some View {
-        Text(/*@START_MENU_TOKEN@*/"Hello, World!"/*@END_MENU_TOKEN@*/)
+final class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
+
+    static let shared = LocationService()
+
+    private let manager = CLLocationManager()
+
+    @Published private(set) var currentCoordinate: CLLocationCoordinate2D?
+    @Published private(set) var authorizationStatus: CLAuthorizationStatus
+
+    private override init() {
+        self.authorizationStatus = manager.authorizationStatus
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        manager.distanceFilter = 10
     }
-}
 
-#Preview {
-    LocationService()
+    func start() {
+        requestAuthorizationIfNeeded()
+        if isAuthorized(status: manager.authorizationStatus) {
+            manager.startUpdatingLocation()
+        }
+    }
+
+    func requestAuthorizationIfNeeded() {
+        let status = manager.authorizationStatus
+        if status == .notDetermined {
+            manager.requestWhenInUseAuthorization()
+        }
+    }
+
+    private func isAuthorized(status: CLAuthorizationStatus) -> Bool {
+        status == .authorizedWhenInUse || status == .authorizedAlways
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let status = manager.authorizationStatus
+        DispatchQueue.main.async {
+            self.authorizationStatus = status
+        }
+
+        if isAuthorized(status: status) {
+            manager.startUpdatingLocation()
+        } else {
+            manager.stopUpdatingLocation()
+            DispatchQueue.main.async {
+                self.currentCoordinate = nil
+            }
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let latest = locations.last else { return }
+        DispatchQueue.main.async {
+            self.currentCoordinate = latest.coordinate
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        print("⚠️ Location update failed:", error.localizedDescription)
+    }
 }

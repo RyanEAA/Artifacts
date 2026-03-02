@@ -16,6 +16,7 @@ struct BrowseButtons: View {
     @Binding var showBrowse: Bool
     @Binding var showSettings: Bool
     @Binding var showProfile: Bool
+
     var body: some View {
         HStack {
             Spacer()
@@ -55,12 +56,10 @@ struct BrowseButtons: View {
     }
 }
 
-// ControlView.swift → SceneButtons
 struct SceneButtons: View {
     @EnvironmentObject var sceneManager: SceneManager
 
     var body: some View {
-        // SAVE (cloud)
         ControlButton(systemIconName: "icloud.and.arrow.up") {
             print("Save Scene Button Pressed..")
             sceneManager.shouldSaveSceneToCloud = true
@@ -69,13 +68,8 @@ struct SceneButtons: View {
 
         Spacer()
 
-        // ControlView.swift → SceneButtons
-
-        // LOAD (cloud)
         ControlButton(systemIconName: "icloud.and.arrow.down") {
             print("Load Scene Button Pressed")
-
-            // Re-fetch latest id on tap, then trigger load
             CloudSceneStore.fetchMostRecentSceneMeta { result in
                 switch result {
                 case .success(let meta):
@@ -83,7 +77,7 @@ struct SceneButtons: View {
                         DispatchQueue.main.async {
                             self.sceneManager.selectedCloudSceneId = meta.id
                             print("Attemping to load scene with id: \(meta.id)")
-                            self.sceneManager.shouldLoadSceneFromCloud = true  // ARViewContainer will do the actual load
+                            self.sceneManager.shouldLoadSceneFromCloud = true
                         }
                     } else {
                         print("No cloud scene found to load.")
@@ -93,16 +87,14 @@ struct SceneButtons: View {
                 }
             }
         }
-        .hidden(sceneManager.selectedCloudSceneId == nil) // shows once we have *some* id
-
+        .hidden(sceneManager.selectedCloudSceneId == nil)
         .onAppear {
-            // Prime (fetch-only) the newest id so the Load button shows up, but DON'T load yet
             CloudSceneStore.fetchMostRecentSceneMeta { result in
                 switch result {
                 case .success(let meta):
                     if let meta {
                         DispatchQueue.main.async {
-                            self.sceneManager.selectedCloudSceneId = meta.id // just set id; no load flag here
+                            self.sceneManager.selectedCloudSceneId = meta.id
                         }
                     }
                 case .failure(let e):
@@ -111,72 +103,84 @@ struct SceneButtons: View {
             }
         }
 
-
-
         Spacer()
 
         ControlButton(systemIconName: "trash") {
             print("clear scene button pressed")
-            // Remove all 3D anchor entities
             for anchorEntity in sceneManager.anchorEntities {
                 print("Removing anchoEntity with id: \(String(describing: anchorEntity.anchorIdentifier)))")
                 anchorEntity.removeFromParent()
             }
             sceneManager.anchorEntities.removeAll()
 
-            // Remove all 2D annotation views from the screen
             for (_, tv) in sceneManager.annotationViews {
                 tv.removeFromSuperview()
             }
+            for (_, btn) in sceneManager.deleteButtons {
+                btn.removeFromSuperview()
+            }
             sceneManager.annotationViews.removeAll()
+            sceneManager.deleteButtons.removeAll()
             sceneManager.isEditing.removeAll()
             sceneManager.hasBeenTapped.removeAll()
+            sceneManager.annotationAnchors.removeAll()
 
-            // Tell ARViewContainer to also remove the underlying ARAnchors
             NotificationCenter.default.post(name: .clearAllAnnotations, object: nil)
         }
     }
 }
-
-
 
 struct ControlView: View {
     @Binding var selectedControlMode: Int
     @Binding var isControlsVisible: Bool
     @Binding var showBrowse: Bool
     @Binding var showSettings: Bool
-    @State private var showProfile=false
+
+    @State private var showProfile = false
+
     var body: some View {
-        VStack{
+        VStack {
             HStack {
-                // add button to show ProfileView()
                 if isControlsVisible {
                     ProfileViewButton(isProfileVisible: $showProfile)
                         .sheet(isPresented: $showProfile) {
                             QuickProfileView()
                                 .preferredColorScheme(.dark)
                                 .presentationBackground(.black)
+                                .onAppear {
+                                    NotificationCenter.default.post(name: .pauseARSession, object: nil)
+                                }
+                                .onDisappear {
+                                    NotificationCenter.default.post(name: .resumeARSession, object: nil)
+                                }
                         }
                 }
 
                 Spacer()
+
                 ControlVisibilityToggleButton(isControlsVisible: $isControlsVisible)
-                
             }
+
             Spacer()
+
             if isControlsVisible {
                 ControlModePicker(selectedControlMode: $selectedControlMode)
-                //ControlButtonBar(showBrowse: $showBrowse, showSettings: //$showSettings, selectedControlMode: selectedControlMode)
-                ControlButtonBar(showBrowse: $showBrowse, showSettings: $showSettings, showProfile: $showProfile, selectedControlMode: selectedControlMode)
+                ControlButtonBar(
+                    showBrowse: $showBrowse,
+                    showSettings: $showSettings,
+                    showProfile: $showProfile,
+                    selectedControlMode: selectedControlMode
+                )
             }
         }
     }
 }
 
-struct ControlVisibilityToggleButton: View{
+struct ControlVisibilityToggleButton: View {
     @Binding var isControlsVisible: Bool
-    var body: some View{
-        HStack{
+
+    var body: some View {
+        HStack {
             Spacer()
 
             Button(action: {
@@ -198,16 +202,14 @@ struct ControlVisibilityToggleButton: View{
         }
         .padding(.top, 45)
         .padding(.trailing, 20)
-
-        
     }
 }
 
-struct ProfileViewButton: View{
+struct ProfileViewButton: View {
     @Binding var isProfileVisible: Bool
-    var body: some View{
-        HStack{
 
+    var body: some View {
+        HStack {
             Button(action: {
                 print("Profile Button Pressed")
                 self.isProfileVisible.toggle()
@@ -227,16 +229,14 @@ struct ProfileViewButton: View{
         }
         .padding(.top, 45)
         .padding(.leading, 20)
-
-        
     }
 }
 
 struct ControlModePicker: View {
     @Binding var selectedControlMode: Int
-    
+
     let controlModes = ControlModes.allCases
-    
+
     init(selectedControlMode: Binding<Int>) {
         self._selectedControlMode = selectedControlMode
 
@@ -250,14 +250,12 @@ struct ControlModePicker: View {
             .font: UIFont.systemFont(ofSize: 13, weight: .semibold)
         ], for: .normal)
         UISegmentedControl.appearance().backgroundColor = UIColor(Color.black.opacity(0.55))
-
     }
-    
+
     var body: some View {
         Picker(selection: $selectedControlMode, label: Text("Select a Control Mode")) {
             ForEach(0..<controlModes.count) { index in
                 Text(self.controlModes[index].rawValue.uppercased()).tag(index)
-                
             }
         }
         .pickerStyle(SegmentedPickerStyle())
@@ -270,25 +268,25 @@ struct ControlModePicker: View {
                 .stroke(Color("MintGreen").opacity(0.14), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        
     }
 }
 
-struct ControlButtonBar: View{
+struct ControlButtonBar: View {
     @Binding var showBrowse: Bool
     @Binding var showSettings: Bool
     @Binding var showProfile: Bool
     var selectedControlMode: Int
-    
+
     var body: some View {
         HStack(alignment: .center) {
             if selectedControlMode == 1 {
                 SceneButtons()
             } else {
-                //BrowseButtons(showBrowse: $showBrowse, showSettings: $showSettings)
-                BrowseButtons(showBrowse: $showBrowse,
-                                              showSettings: $showSettings,
-                                             showProfile: $showProfile)
+                BrowseButtons(
+                    showBrowse: $showBrowse,
+                    showSettings: $showSettings,
+                    showProfile: $showProfile
+                )
             }
         }
         .frame(maxWidth: 500)
@@ -306,6 +304,7 @@ struct ControlButtonBar: View{
 struct ControlButton: View {
     let systemIconName: String
     let action: () -> Void
+
     var body: some View {
         Button(action: {
             self.action()
@@ -325,17 +324,17 @@ struct ControlButton: View {
     }
 }
 
-struct MostRecentlyPlacedButton: View{
+struct MostRecentlyPlacedButton: View {
     @EnvironmentObject var placementSettings: PlacementSettings
-    var body: some View{
-        Button(action:{
+
+    var body: some View {
+        Button(action: {
             print("most recently placed button pressed")
             if let model = self.placementSettings.recentlyPlaced.last {
                 self.placementSettings.selectedTool = .model(model)
             }
-        }){
+        }) {
             if let mostRecentlyPlacedModel = self.placementSettings.recentlyPlaced.last {
-                // colelction not empy
                 Image(uiImage: mostRecentlyPlacedModel.thumbnail)
                     .resizable()
                     .frame(width: 44, height: 44)
@@ -349,7 +348,6 @@ struct MostRecentlyPlacedButton: View{
                 Image(systemName: "clock.fill")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(Color("MintGreen").opacity(0.92))
-            
             }
         }
         .frame(width: 50, height: 50)
@@ -359,9 +357,5 @@ struct MostRecentlyPlacedButton: View{
                 .stroke(Color("MintGreen").opacity(0.16), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 16))
-
     }
-}
-extension Notification.Name {
-    static let clearAllAnnotations = Notification.Name("ClearAllAnnotationsNotification")
 }

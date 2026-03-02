@@ -2,8 +2,6 @@
 //  ArtifactsService.swift
 //  Artifacts
 //
-//  Created by Swapnil Puri on 2/18/26.
-//
 
 import Foundation
 import FirebaseFirestore
@@ -32,7 +30,9 @@ final class ArtifactsService {
 
     private init() {}
 
-    func listenMyArtifacts(completion: @escaping ([ArtifactMapItem]) -> Void) throws -> ListenerRegistration {
+    // MARK: - Profile Queries
+
+    func listenMyPublishedArtifacts(completion: @escaping ([ArtifactMapItem]) -> Void) throws -> ListenerRegistration {
         guard let uid = Auth.auth().currentUser?.uid else {
             completion([])
             return db.collection("artifacts").addSnapshotListener { _, _ in }
@@ -42,28 +42,88 @@ final class ArtifactsService {
             .whereField("ownerUid", isEqualTo: uid)
             .addSnapshotListener { snapshot, error in
                 if let error {
-                    print("⚠️ listenMyArtifacts error:", error.localizedDescription)
+                    print("⚠️ listenMyPublishedArtifacts error:", error.localizedDescription)
                     completion([])
                     return
                 }
 
                 let docs = snapshot?.documents ?? []
-                let items: [ArtifactMapItem] = docs.compactMap { doc in
-                    Self.decodeArtifact(docId: doc.documentID, data: doc.data())
-                }
-                .sorted { $0.createdAt > $1.createdAt }
+                let items: [ArtifactMapItem] = docs
+                    .filter { doc in
+                        let published = doc.data()["published"] as? Bool
+                        return published != false
+                    }
+                    .compactMap { doc in
+                        Self.decodeArtifact(docId: doc.documentID, data: doc.data())
+                    }
+                    .sorted { $0.createdAt > $1.createdAt }
 
                 completion(items)
             }
     }
 
-    // MARK: Create
+    func publishDraftArtifacts(sceneId: String) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "ArtifactsService", code: 401, userInfo: [
+                NSLocalizedDescriptionKey: "User is not authenticated"
+            ])
+        }
+        guard !sceneId.isEmpty else { return }
+
+        let query = db.collection("artifacts")
+            .whereField("ownerUid", isEqualTo: uid)
+            .whereField("sceneId", isEqualTo: sceneId)
+            .whereField("published", isEqualTo: false)
+
+        let snap = try await query.getDocuments()
+        guard !snap.documents.isEmpty else { return }
+
+        let batch = db.batch()
+        let now = FieldValue.serverTimestamp()
+        for doc in snap.documents {
+            batch.updateData([
+                "published": true,
+                "publishedAt": now,
+                "updatedAt": now
+            ], forDocument: doc.reference)
+        }
+        try await batch.commit()
+    }
+
+    // MARK: - Annotation Text Overrides For Reload
+
+    /// Fetch latest annotation text for the current user and scene from Firestore.
+    /// This is used on scene reload to override any stale or empty anchor payload text.
+    func fetchMyAnnotationTextOverrides(sceneId: String) async throws -> [String: String] {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "ArtifactsService", code: 401, userInfo: [
+                NSLocalizedDescriptionKey: "User is not authenticated"
+            ])
+        }
+        guard !sceneId.isEmpty else { return [:] }
+
+        let snap = try await db.collection("artifacts")
+            .whereField("ownerUid", isEqualTo: uid)
+            .whereField("sceneId", isEqualTo: sceneId)
+            .whereField("type", isEqualTo: "annotation")
+            .getDocuments()
+
+        var out: [String: String] = [:]
+        for doc in snap.documents {
+            let text = (doc.data()["annotationText"] as? String) ?? ""
+            out[doc.documentID] = text
+        }
+        return out
+    }
+
+    // MARK: - Create
 
     func createAnnotationArtifact(
         artifactId: String,
         annotationText: String,
         sceneId: String,
-        transform: simd_float4x4
+        transform: simd_float4x4,
+        coordinate: CLLocationCoordinate2D? = nil
     ) async throws {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "ArtifactsService", code: 401, userInfo: [
@@ -74,17 +134,24 @@ final class ArtifactsService {
         let position = Self.positionArray(from: transform)
         let transformArray = Self.transformArray(from: transform)
 
-        let doc: [String: Any] = [
+        var doc: [String: Any] = [
             "id": artifactId,
             "ownerUid": uid,
             "sceneId": sceneId,
             "type": "annotation",
             "annotationText": annotationText,
+            "published": false,
             "position": position,
             "transform": transformArray,
             "createdAt": FieldValue.serverTimestamp(),
             "updatedAt": FieldValue.serverTimestamp()
         ]
+
+        if let coordinate {
+            doc["location"] = GeoPoint(latitude: coordinate.latitude, longitude: coordinate.longitude)
+            doc["latitude"] = coordinate.latitude
+            doc["longitude"] = coordinate.longitude
+        }
 
         try await db.collection("artifacts").document(artifactId).setData(doc, merge: true)
     }
@@ -104,7 +171,8 @@ final class ArtifactsService {
         artifactId: String,
         modelName: String,
         sceneId: String,
-        transform: simd_float4x4
+        transform: simd_float4x4,
+        coordinate: CLLocationCoordinate2D? = nil
     ) async throws {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "ArtifactsService", code: 401, userInfo: [
@@ -115,22 +183,29 @@ final class ArtifactsService {
         let position = Self.positionArray(from: transform)
         let transformArray = Self.transformArray(from: transform)
 
-        let doc: [String: Any] = [
+        var doc: [String: Any] = [
             "id": artifactId,
             "ownerUid": uid,
             "sceneId": sceneId,
             "type": "model",
             "modelName": modelName,
+            "published": false,
             "position": position,
             "transform": transformArray,
             "createdAt": FieldValue.serverTimestamp(),
             "updatedAt": FieldValue.serverTimestamp()
         ]
 
+        if let coordinate {
+            doc["location"] = GeoPoint(latitude: coordinate.latitude, longitude: coordinate.longitude)
+            doc["latitude"] = coordinate.latitude
+            doc["longitude"] = coordinate.longitude
+        }
+
         try await db.collection("artifacts").document(artifactId).setData(doc, merge: true)
     }
 
-    // MARK: Helpers
+    // MARK: - Helpers
 
     private static func positionArray(from transform: simd_float4x4) -> [Double] {
         [
