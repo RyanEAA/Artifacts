@@ -6,6 +6,31 @@ Artifacts is a SwiftUI + ARKit application that allows users to place, view, and
 This repository documents both the **implementation** and the **system architecture**, with diagrams and explanations intended for onboarding, maintenance, and portfolio review.
 
 ---
+## Pictures
+### Login View
+<img width="642" height="1389" alt="IMG_0905" src="https://github.com/user-attachments/assets/4b0c5adc-8c6a-45fc-a619-c73099121d17" />
+
+### Profile View
+<img width="642" height="1389" alt="IMG_0907" src="https://github.com/user-attachments/assets/98ac7629-31a1-4eba-8f6b-8a6d1e2da26d" />
+
+### Settings View
+<img width="642" height="1389" alt="IMG_0908" src="https://github.com/user-attachments/assets/5dda5012-a756-4599-9ec2-074a04d01a8b" />
+
+
+### AR Objects (Artifact) Browse View
+<img width="642" height="1389" alt="IMG_0906" src="https://github.com/user-attachments/assets/8c504e75-b50a-4327-8229-9285de44ec6c" />
+
+### 3D Chameleon Artifact
+<img width="642" height="1389" alt="IMG_0910" src="https://github.com/user-attachments/assets/7233bb9b-19e0-4587-b182-4ea914e94c46" />
+
+### 2D Annotation Artifact
+<img width="642" height="1389" alt="IMG_0911" src="https://github.com/user-attachments/assets/cb928f41-ff2d-4bb0-976a-e5e6e9e5e2b4" />
+
+### Drawing Artifact
+<img width="642" height="1389" alt="IMG_0914" src="https://github.com/user-attachments/assets/0445d986-3d40-431d-bcf1-ac8bb58a3cc0" />
+
+
+--
 
 ## Core Features
 

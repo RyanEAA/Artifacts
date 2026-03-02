@@ -2,8 +2,6 @@
 //  ContentView.swift
 //  ARTutorial
 //
-//  Created by Ryan Aparicio on 10/7/25.
-//
 
 import SwiftUI
 import FirebaseAuth
@@ -12,17 +10,15 @@ struct ContentView: View {
     @EnvironmentObject var placementSettings: PlacementSettings
     @EnvironmentObject var modelsViewModel: ModelsViewModel
     @EnvironmentObject var modelDeletionManager: ModelDeletionManager
-    
-    
+
     @State private var selectedControlMode: Int = 0
     @State private var isControlsVisible: Bool = true
     @State private var showBrowse: Bool = false
     @State private var showSettings: Bool = false
-    
+
     var body: some View {
-        
+
         ZStack(alignment: .bottom){
-             //adding AR View Container
             ARViewContainer()
                
             
@@ -43,8 +39,10 @@ struct ContentView: View {
         .onAppear() {
             self.modelsViewModel.fetchData()
             self.ensureSignedIn()
+            LocationService.shared.start()
         }
     }
+
     func ensureSignedIn() {
         if Auth.auth().currentUser == nil {
             Auth.auth().signInAnonymously { result, error in
@@ -56,7 +54,6 @@ struct ContentView: View {
         }
     }
 }
-
 
 #Preview {
     ContentView()

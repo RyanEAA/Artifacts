@@ -13,6 +13,7 @@ import FirebaseFirestore
 public struct FriendUser: Identifiable, Hashable {
     public let id: String      // uid
     public let username: String
+    public let profilePictureURL: String?
 }
 
 @MainActor
@@ -90,8 +91,8 @@ final class FriendsService: ObservableObject {
             }
     }
 
-
     // MARK: - FETCH / SEARCH
+
     /// One-shot fetch of accepted friend UIDs.
     func fetchAcceptedFriendUIDsOnce() async throws -> [String] {
         let me = try uid
@@ -107,7 +108,6 @@ final class FriendsService: ObservableObject {
         return Array(Set(uids))
     }
 
-
     /// Resolve usernames for a list of UIDs (chunks of 10 for Firestore `in`).
     func fetchUsernames(for uids: [String]) async throws -> [FriendUser] {
         guard !uids.isEmpty else { return [] }
@@ -119,7 +119,8 @@ final class FriendsService: ObservableObject {
             result += snap.documents.map {
                 FriendUser(
                     id: $0.documentID,
-                    username: ($0.get("username") as? String) ?? $0.documentID
+                    username: ($0.get("username") as? String) ?? $0.documentID,
+                    profilePictureURL: ($0.get("profilePictureURL") as? String)
                 )
             }
         }
@@ -145,7 +146,8 @@ final class FriendsService: ObservableObject {
         return snap.documents.map {
             FriendUser(
                 id: $0.documentID,
-                username: ($0.get("username") as? String) ?? $0.documentID
+                username: ($0.get("username") as? String) ?? $0.documentID,
+                profilePictureURL: ($0.get("profilePictureURL") as? String)
             )
         }
     }
@@ -189,13 +191,10 @@ final class FriendsService: ObservableObject {
         try await db.collection("friendLinks").document(pairId).setData(data)
     }
 
-    // FriendsService.swift (patch these)
-
     /// Accept a pending request from `otherUid`. (Recipient must call.)
     func acceptRequest(from otherUid: String) async throws {
         let me = try uid
 
-        // Find the pending link where I am the recipient and `otherUid` is the requester
         let snap = try await db.collection("friendLinks")
             .whereField("participants", arrayContains: me)
             .whereField("status", isEqualTo: "pending")
@@ -236,16 +235,15 @@ final class FriendsService: ObservableObject {
         ])
     }
 
-
     /// Cancel a sent request or unfriend (delete the link).
     func removeLink(with otherUid: String) async throws {
         let me = try uid
         let id = pairId(me, otherUid)
         try await db.collection("friendLinks").document(id).delete()
     }
-    
+
     // MARK: - Incoming requests listener (recipient == me)
-    // Add alongside your other models
+
     struct IncomingRequest: Identifiable, Hashable {
         let id: String            // friendLinks doc id
         let requesterUid: String
@@ -256,7 +254,7 @@ final class FriendsService: ObservableObject {
     ) throws -> ListenerRegistration {
         let me = try uid
         return db.collection("friendLinks")
-            .whereField("participants", arrayContains: me)    // <- important
+            .whereField("participants", arrayContains: me)
             .whereField("recipientUid", isEqualTo: me)
             .whereField("status", isEqualTo: "pending")
             .addSnapshotListener { snap, error in
@@ -274,10 +272,7 @@ final class FriendsService: ObservableObject {
                 onChange(rows)
             }
     }
-
-
 }
-
 
 // MARK: - Small util
 

@@ -11,12 +11,13 @@ import CoreLocation
 import UIKit
 import FirebaseAuth
 import FirebaseFirestore
+import FirebaseStorage
 
 struct QuickProfileView: View {
     @EnvironmentObject var session: SessionManager
     @EnvironmentObject var friendsService: FriendsService
 
-    private let artifactsService = ArtifactsService()
+    private let artifactsService = ArtifactsService.shared
 
     @State private var friendCount: Int = 0
     @State private var friends: [String] = []
@@ -31,6 +32,14 @@ struct QuickProfileView: View {
     @State private var selectedArtifact: ArtifactMapItem?
     @State private var didAutoCenter = false
 
+    // Profile photo
+    @State private var profileImageURL: String? = nil
+    @State private var selectedProfileImage: UIImage? = nil
+    @State private var showImagePicker = false
+    @State private var isUploadingProfileImage = false
+    @State private var uploadErrorMessage: String? = nil
+    @State private var showUploadErrorAlert = false
+
     @State private var region = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 30.2672, longitude: -97.7431),
         span: MKCoordinateSpan(latitudeDelta: 0.03, longitudeDelta: 0.03)
@@ -43,16 +52,14 @@ struct QuickProfileView: View {
     private var hasArtifacts: Bool { !artifacts.isEmpty }
 
     var body: some View {
-        GeometryReader { geo in
+        GeometryReader { _ in
             ZStack {
                 ProfileBackground()
                     .ignoresSafeArea()
 
                 VStack(spacing: 14) {
                     header
-
                     statsRow
-
                     mapCard
                         .frame(maxWidth: .infinity)
                         .frame(maxHeight: .infinity)
@@ -81,7 +88,21 @@ struct QuickProfileView: View {
                 .presentationDetents([.medium])
                 .presentationBackground(.black)
         }
+        .sheet(isPresented: $showImagePicker) {
+            ImagePicker(image: $selectedProfileImage)
+                .ignoresSafeArea()
+        }
+        .onChange(of: selectedProfileImage) { newImage in
+            guard let newImage else { return }
+            uploadProfileImage(newImage)
+        }
+        .alert("Profile Photo Upload Failed", isPresented: $showUploadErrorAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(uploadErrorMessage ?? "An unknown error occurred.")
+        }
         .onAppear {
+            profileImageURL = (session.userData?["profilePictureURL"] as? String)
             startFriendsListener()
             startArtifactsListener()
         }
@@ -89,30 +110,73 @@ struct QuickProfileView: View {
             friendsListener?.remove()
             artifactsListener?.remove()
         }
+        .onChange(of: session.userData?["profilePictureURL"] as? String) { newValue in
+            profileImageURL = newValue
+        }
     }
 
     private var header: some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Color.white.opacity(0.06))
-                    .frame(width: 54, height: 54)
-                    .overlay(
-                        Circle()
-                            .stroke(Color("MintGreen").opacity(0.28), lineWidth: 1)
-                    )
 
-                Image(systemName: "person.fill")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(Color("MintGreen").opacity(0.92))
+            Button {
+                showImagePicker = true
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(0.06))
+                        .frame(width: 54, height: 54)
+                        .overlay(
+                            Circle()
+                                .stroke(Color("MintGreen").opacity(0.28), lineWidth: 1)
+                        )
+
+                    if let selectedProfileImage {
+                        Image(uiImage: selectedProfileImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 54, height: 54)
+                            .clipShape(Circle())
+                    } else if let urlString = profileImageURL, let url = URL(string: urlString) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .empty:
+                                ProgressView()
+                                    .tint(Color("MintGreen"))
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .scaledToFill()
+                            default:
+                                Image(systemName: "person.fill")
+                                    .font(.system(size: 22, weight: .bold))
+                                    .foregroundColor(Color("MintGreen").opacity(0.92))
+                            }
+                        }
+                        .frame(width: 54, height: 54)
+                        .clipShape(Circle())
+                    } else {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundColor(Color("MintGreen").opacity(0.92))
+                    }
+
+                    if isUploadingProfileImage {
+                        Circle()
+                            .fill(Color.black.opacity(0.45))
+                            .frame(width: 54, height: 54)
+                        ProgressView()
+                            .tint(.white)
+                    }
+                }
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Change profile photo")
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("@\(username)")
                     .font(.custom("Poppins-Bold", size: 20))
                     .foregroundColor(Color.white.opacity(0.92))
 
-                // Optional: show email if you want a second line that is actually useful.
                 if let email = session.user?.email, !email.isEmpty {
                     Text(email)
                         .font(.custom("Poppins-Regular", size: 12))
@@ -189,6 +253,13 @@ struct QuickProfileView: View {
                         ArtifactPin(isSelected: selectedArtifact?.id == item.id)
                             .onTapGesture {
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                withAnimation(.easeInOut(duration: 0.30)) {
+                                    region.center = item.coordinate
+                                }
+                                openAppleMapsForArtifact(item)
+                            }
+                            .onLongPressGesture {
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                 selectedArtifact = item
                                 withAnimation(.easeInOut(duration: 0.30)) {
                                     region.center = item.coordinate
@@ -203,35 +274,36 @@ struct QuickProfileView: View {
                 )
 
                 if !hasArtifacts {
-                    HStack(spacing: 10) {
-                        Image(systemName: "sparkles")
-                            .foregroundColor(Color("MintGreen").opacity(0.92))
-                        Text("Place an artifact to see pins here")
-                            .font(.custom("Poppins-Regular", size: 13))
-                            .foregroundColor(Color.white.opacity(0.80))
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("No published artifacts yet")
+                            .font(.custom("Poppins-Bold", size: 14))
+                            .foregroundColor(Color.white.opacity(0.90))
+
+                        Text("Place artifacts and press Save to publish them to your map.")
+                            .font(.custom("Poppins-Regular", size: 12))
+                            .foregroundColor(Color.white.opacity(0.65))
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 12)
-                    .background(Color.black.opacity(0.60))
+                    .padding(12)
+                    .background(Color.black.opacity(0.52))
                     .overlay(
-                        Capsule()
-                            .stroke(Color("MintGreen").opacity(0.18), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.white.opacity(0.10), lineWidth: 1)
                     )
-                    .clipShape(Capsule())
+                    .cornerRadius(14)
                     .padding(12)
                 }
             }
-            .frame(maxWidth: .infinity)
-            .frame(maxHeight: .infinity)
+            .frame(height: 260)
         }
         .padding(14)
         .background(ProfileCardBackground())
         .overlay(
             RoundedRectangle(cornerRadius: 18)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(Color("MintGreen").opacity(0.12), lineWidth: 1)
         )
         .cornerRadius(18)
-        .shadow(color: Color.black.opacity(0.50), radius: 18, x: 0, y: 12)
+        .shadow(color: Color.black.opacity(0.55), radius: 18, x: 0, y: 12)
     }
 
     private var logoutBar: some View {
@@ -240,19 +312,19 @@ struct QuickProfileView: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "rectangle.portrait.and.arrow.right")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 14, weight: .bold))
                 Text("Log out")
-                    .font(.custom("Poppins-SemiBold", size: 16))
+                    .font(.custom("Poppins-SemiBold", size: 14))
             }
-            .foregroundColor(Color.white.opacity(0.90))
-            .padding(.vertical, 12)
+            .foregroundColor(Color.white.opacity(0.92))
             .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
             .background(Color.white.opacity(0.06))
             .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(Color.red.opacity(0.30), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
             )
-            .cornerRadius(14)
+            .cornerRadius(16)
         }
         .buttonStyle(.plain)
     }
@@ -278,7 +350,7 @@ struct QuickProfileView: View {
 
     private func startArtifactsListener() {
         do {
-            artifactsListener = try artifactsService.listenMyArtifacts { items in
+            artifactsListener = try artifactsService.listenMyPublishedArtifacts { items in
                 Task { @MainActor in
                     self.artifacts = items
 
@@ -291,7 +363,97 @@ struct QuickProfileView: View {
                 }
             }
         } catch {
-            print("⚠️ listenMyArtifacts failed:", error)
+            print("⚠️ listenMyPublishedArtifacts failed:", error)
+        }
+    }
+
+    private func openAppleMapsForArtifact(_ item: ArtifactMapItem) {
+        let placemark = MKPlacemark(coordinate: item.coordinate)
+        let mapItem = MKMapItem(placemark: placemark)
+        mapItem.name = item.title
+
+        let launchOptions: [String: Any] = [
+            MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving,
+            MKLaunchOptionsShowsTrafficKey: true
+        ]
+
+        MKMapItem.openMaps(with: [mapItem], launchOptions: launchOptions)
+    }
+
+    private func uploadProfileImage(_ image: UIImage) {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            uploadErrorMessage = "You must be signed in to upload a profile photo."
+            showUploadErrorAlert = true
+            return
+        }
+
+        guard !isUploadingProfileImage else { return }
+        isUploadingProfileImage = true
+        uploadErrorMessage = nil
+
+        guard let data = image.jpegData(compressionQuality: 0.82) else {
+            isUploadingProfileImage = false
+            uploadErrorMessage = "Unable to process the selected image."
+            showUploadErrorAlert = true
+            return
+        }
+
+        let ref = Storage.storage().reference(withPath: "users/\(uid)/profile.jpg")
+        let metadata = StorageMetadata()
+        metadata.contentType = "image/jpeg"
+
+        ref.putData(data, metadata: metadata) { _, error in
+            if let error {
+                DispatchQueue.main.async {
+                    self.isUploadingProfileImage = false
+                    self.uploadErrorMessage = error.localizedDescription
+                    self.showUploadErrorAlert = true
+                }
+                return
+            }
+
+            ref.downloadURL { url, error in
+                if let error {
+                    DispatchQueue.main.async {
+                        self.isUploadingProfileImage = false
+                        self.uploadErrorMessage = error.localizedDescription
+                        self.showUploadErrorAlert = true
+                    }
+                    return
+                }
+
+                guard let url else {
+                    DispatchQueue.main.async {
+                        self.isUploadingProfileImage = false
+                        self.uploadErrorMessage = "Could not get download URL."
+                        self.showUploadErrorAlert = true
+                    }
+                    return
+                }
+
+                let urlString = url.absoluteString
+
+                Firestore.firestore().collection("users").document(uid).setData([
+                    "profilePictureURL": urlString,
+                    "lastActive": Timestamp(date: Date())
+                ], merge: true) { error in
+                    DispatchQueue.main.async {
+                        self.isUploadingProfileImage = false
+
+                        if let error {
+                            self.uploadErrorMessage = error.localizedDescription
+                            self.showUploadErrorAlert = true
+                            return
+                        }
+
+                        self.profileImageURL = urlString
+
+                        var updated = self.session.userData ?? [:]
+                        updated["profilePictureURL"] = urlString
+                        self.session.userData = updated
+                    }
+                }
+            }
         }
     }
 }

@@ -372,6 +372,6 @@ struct MostRecentlyPlacedButton: View{
     }
 }
 
-extension Notification.Name {
-    static let clearAllAnnotations = Notification.Name("ClearAllAnnotationsNotification")
-}
+//extension Notification.Name {
+//    static let clearAllAnnotations = Notification.Name("ClearAllAnnotationsNotification")
+//}

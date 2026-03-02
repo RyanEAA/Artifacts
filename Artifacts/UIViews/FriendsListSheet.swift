@@ -22,6 +22,7 @@ struct FriendsListSheet: View {
         let id: String
         let requesterUid: String
         let username: String
+        let profilePictureURL: String?
     }
 
     @State private var incoming: [RequestRow] = []
@@ -74,6 +75,7 @@ struct FriendsListSheet: View {
                                         FriendRow(
                                             title: r.username,
                                             subtitle: nil,
+                                            leadingImageURL: r.profilePictureURL,
                                             leadingSystemImage: "person.fill",
                                             primaryTitle: "Confirm",
                                             secondaryTitle: "Delete",
@@ -105,6 +107,7 @@ struct FriendsListSheet: View {
                                             FriendRow(
                                                 title: u.username,
                                                 subtitle: nil,
+                                                leadingImageURL: u.profilePictureURL,
                                                 leadingSystemImage: "person.fill",
                                                 primaryTitle: "Message",
                                                 secondaryTitle: "Remove",
@@ -133,6 +136,7 @@ struct FriendsListSheet: View {
                                             FriendRow(
                                                 title: u.username,
                                                 subtitle: nil,
+                                                leadingImageURL: u.profilePictureURL,
                                                 leadingSystemImage: "person.fill",
                                                 primaryTitle: "Message",
                                                 secondaryTitle: "Remove",
@@ -163,6 +167,7 @@ struct FriendsListSheet: View {
                                             FriendRow(
                                                 title: u.username,
                                                 subtitle: isPending ? "Request sent" : nil,
+                                                leadingImageURL: u.profilePictureURL,
                                                 leadingSystemImage: "person.fill",
                                                 primaryTitle: isPending ? "Sent" : "Add",
                                                 secondaryTitle: isPending ? "Unsend" : "Hide",
@@ -278,7 +283,7 @@ struct FriendsListSheet: View {
         }
 
         return friends
-            .map { FriendUser(id: $0, username: $0) }
+            .map { FriendUser(id: $0, username: $0, profilePictureURL: nil) }
             .sorted { $0.username.lowercased() < $1.username.lowercased() }
     }
 
@@ -329,9 +334,15 @@ struct FriendsListSheet: View {
                 Task {
                     let requesters = rows.map { $0.requesterUid }
                     let users = try? await friendsService.fetchUsernames(for: requesters)
-                    let map = Dictionary(uniqueKeysWithValues: (users ?? []).map { ($0.id, $0.username) })
+                    let map = Dictionary(uniqueKeysWithValues: (users ?? []).map { ($0.id, ($0.username, $0.profilePictureURL)) })
                     let display = rows.map {
-                        RequestRow(id: $0.id, requesterUid: $0.requesterUid, username: map[$0.requesterUid] ?? "user")
+                        let tuple = map[$0.requesterUid]
+                        return RequestRow(
+                            id: $0.id,
+                            requesterUid: $0.requesterUid,
+                            username: tuple?.0 ?? "user",
+                            profilePictureURL: tuple?.1
+                        )
                     }
                     .sorted { $0.username.lowercased() < $1.username.lowercased() }
 
@@ -557,6 +568,7 @@ private struct FriendRow: View {
 
     let title: String
     let subtitle: String?
+    let leadingImageURL: String?
     let leadingSystemImage: String
 
     let primaryTitle: String
@@ -580,9 +592,27 @@ private struct FriendRow: View {
                         Circle().stroke(Color("MintGreen").opacity(0.18), lineWidth: 1)
                     )
 
-                Image(systemName: leadingSystemImage)
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(Color("MintGreen").opacity(0.92))
+                if let urlString = leadingImageURL,
+                   let url = URL(string: urlString) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        default:
+                            Image(systemName: leadingSystemImage)
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundColor(Color("MintGreen").opacity(0.92))
+                        }
+                    }
+                    .frame(width: 46, height: 46)
+                    .clipShape(Circle())
+                } else {
+                    Image(systemName: leadingSystemImage)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(Color("MintGreen").opacity(0.92))
+                }
             }
 
             VStack(alignment: .leading, spacing: 3) {

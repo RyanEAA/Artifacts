@@ -43,6 +43,14 @@ struct FullMapView: View {
                         withAnimation(.easeInOut(duration: 0.35)) {
                             region.center = item.coordinate
                         }
+                        openAppleMapsForArtifact(item)
+                    }
+                    .onLongPressGesture {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        selected = item
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            region.center = item.coordinate
+                        }
                     }
                 }
             }
@@ -116,6 +124,19 @@ struct FullMapView: View {
                 region.center = first.coordinate
             }
         }
+    }
+
+    private func openAppleMapsForArtifact(_ item: ArtifactMapItem) {
+        let placemark = MKPlacemark(coordinate: item.coordinate)
+        let mapItem = MKMapItem(placemark: placemark)
+        mapItem.name = item.title
+
+        let launchOptions: [String: Any] = [
+            MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving,
+            MKLaunchOptionsShowsTrafficKey: true
+        ]
+
+        MKMapItem.openMaps(with: [mapItem], launchOptions: launchOptions)
     }
 }
 
