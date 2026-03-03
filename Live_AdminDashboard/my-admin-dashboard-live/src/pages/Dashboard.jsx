@@ -71,13 +71,14 @@ export default function Dashboard() {
           ) : (
             <ul className="list-disc pl-6 space-y-2 text-textSecondary">
               {users.map(u => (
-                <li key={u.id}>
-                  <span className="font-medium text-textPrimary">Email:</span>{" "}
-                  {u.email}
-                  <br />
-                  <span className="font-medium text-textPrimary">Username:</span>{" "}
-                  {u.username}
-                </li>
+                u.username !== "admin" &&
+                  <li key={u.id}>
+                    <span className="font-medium text-textPrimary">Email:</span>{" "}
+                    {u.email}
+                    <br />
+                    <span className="font-medium text-textPrimary">Username:</span>{" "}
+                    {u.username}
+                  </li>
               ))}
             </ul>
           )}
