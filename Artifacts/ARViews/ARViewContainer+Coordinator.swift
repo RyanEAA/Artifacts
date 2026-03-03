@@ -55,7 +55,10 @@ extension ARViewContainer {
                 // Annotation anchors
                 if let name = anchor.name, name.hasPrefix(annotationNamePrefix) {
                     let base64 = String(name.dropFirst(annotationNamePrefix.count))
-                    if let data = parent.decodeAnnotation(from: base64) {
+                    if var data = parent.decodeAnnotation(from: base64) {
+                        if let override = parent.sceneManager.annotationTextOverrides[data.id.uuidString] {
+                            data.text = override
+                        }
                         parent.attachAnnotationView(for: anchor, data: data, on: arView)
                     }
                 }
@@ -184,6 +187,7 @@ extension ARViewContainer {
                             parent.sceneManager.annotationAnchors[editingId] = newAnchor
                         }
                     }
+                    parent.updateAnnotationTextInFirestore(annotationId: editingId, text: trimmed)
                 }
                 return
             }

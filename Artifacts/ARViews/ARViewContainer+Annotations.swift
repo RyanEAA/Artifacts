@@ -27,6 +27,56 @@ extension ARViewContainer {
         return newId
     }
 
+    func startRealtimeAnnotationSyncIfNeeded(on arView: ARView) {
+        guard let sceneId = self.sceneManager.selectedCloudSceneId, !sceneId.isEmpty else { return }
+
+        if self.sceneManager.annotationTextListenerSceneId == sceneId,
+           self.sceneManager.annotationTextListener != nil {
+            return
+        }
+
+        self.sceneManager.stopAnnotationTextListener()
+        self.sceneManager.annotationTextListenerSceneId = sceneId
+        self.sceneManager.annotationTextListener = ArtifactsService.shared.listenMyAnnotationTextOverrides(
+            sceneId: sceneId
+        ) { overrides in
+            DispatchQueue.main.async {
+                self.sceneManager.annotationTextOverrides = overrides
+                self.applyAnnotationTextOverrides(on: arView, overrides: overrides)
+            }
+        }
+    }
+
+    func applyAnnotationTextOverrides(on arView: ARView, overrides: [String: String]) {
+        for (artifactId, rawText) in overrides {
+            guard let id = UUID(uuidString: artifactId),
+                  let tv = self.sceneManager.annotationViews[id] else { continue }
+            if self.sceneManager.isEditing[id] == true { continue }
+
+            let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let displayText = trimmed.isEmpty ? "Tap to Edit" : rawText
+            if tv.text != displayText {
+                tv.text = displayText
+            }
+
+            self.sceneManager.hasBeenTapped[id] = !trimmed.isEmpty
+            if trimmed.isEmpty {
+                self.showDeleteButton(for: id, on: arView)
+            } else {
+                self.hideDeleteButton(for: id)
+            }
+
+            guard let oldAnchor = self.sceneManager.annotationAnchors[id] else { continue }
+            let payload = AnnotationData(id: id, text: rawText)
+            let desiredName = annotationNamePrefix + encodeAnnotation(payload)
+            if oldAnchor.name == desiredName { continue }
+            let newAnchor = ARAnchor(name: desiredName, transform: oldAnchor.transform)
+            arView.session.add(anchor: newAnchor)
+            arView.session.remove(anchor: oldAnchor)
+            self.sceneManager.annotationAnchors[id] = newAnchor
+        }
+    }
+
     private func saveAnnotationToFirestore(annotationId: UUID, text: String, transform: simd_float4x4) {
         let sceneId = currentSceneIdForArtifacts()
         let artifactId = annotationId.uuidString
@@ -48,7 +98,7 @@ extension ARViewContainer {
         }
     }
 
-    private func updateAnnotationTextInFirestore(annotationId: UUID, text: String) {
+    func updateAnnotationTextInFirestore(annotationId: UUID, text: String) {
         let artifactId = annotationId.uuidString
         Task {
             do {
@@ -143,6 +193,8 @@ extension ARViewContainer {
         guard let text = self.sceneManager.pendingAnnotationText else { return }
         guard let transform = getTransformForPlacement(in: arView) else { return }
 
+        startRealtimeAnnotationSyncIfNeeded(on: arView)
+
         let id = UUID()
         let payload = AnnotationData(id: id, text: text)
         let name = annotationNamePrefix + encodeAnnotation(payload)
@@ -162,6 +214,8 @@ extension ARViewContainer {
             .flatMap { $0.isEmpty ? nil : $0 } ?? "Tap to Edit"
 
         guard let transform = getTransformForPlacement(in: arView, at: point) else { return }
+
+        startRealtimeAnnotationSyncIfNeeded(on: arView)
 
         let id = UUID()
         let payload = AnnotationData(id: id, text: rawText == "Tap to Edit" ? "" : rawText)

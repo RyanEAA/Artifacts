@@ -11,6 +11,7 @@ import RealityKit
 import ARKit
 import Combine
 import UIKit
+import FirebaseFirestore
 
 class SceneManager: ObservableObject {
 
@@ -62,8 +63,16 @@ class SceneManager: ObservableObject {
     // Firestore override cache for the currently loading scene.
     // Key is artifactId (UUID string), value is annotationText.
     var annotationTextOverrides: [String: String] = [:]
+    var annotationTextListener: ListenerRegistration?
+    var annotationTextListenerSceneId: String?
 
     func requestAddAnnotation(text: String) {
         pendingAnnotationText = text
+    }
+
+    func stopAnnotationTextListener() {
+        annotationTextListener?.remove()
+        annotationTextListener = nil
+        annotationTextListenerSceneId = nil
     }
 }
