@@ -203,6 +203,11 @@ export default function Artifacts() {
                       Annotation ID:
                     </span>{" "}
                     {a.id}
+                    <br />
+                    <span className="font-medium text-textPrimary">
+                      Date Created:
+                    </span>{" "}
+                    {a.createdAt?.toDate().toLocaleString() || "N/A"}
                   </div>
                   {canModerate && (
                     <button
@@ -245,6 +250,11 @@ export default function Artifacts() {
                       Annotation ID:
                     </span>{" "}
                     {a.id}
+                    <br />
+                    <span className="font-medium text-textPrimary">
+                      Date Created:
+                    </span>{" "}
+                    {a.createdAt?.toDate().toLocaleString() || "N/A"}
                   </div>
                   {canModerate && (
                     <button
@@ -287,6 +297,11 @@ export default function Artifacts() {
                       Annotation ID:
                     </span>{" "}
                     {a.id}
+                    <br />
+                    <span className="font-medium text-textPrimary">
+                      Date Created:
+                    </span>{" "}
+                    {a.createdAt?.toDate().toLocaleString() || "N/A"}
                   </div>
                   {canModerate && (
                     <button
