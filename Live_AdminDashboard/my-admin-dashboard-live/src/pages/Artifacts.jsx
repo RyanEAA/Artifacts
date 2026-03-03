@@ -135,7 +135,13 @@ export default function Artifacts() {
   const [censoringId, setCensoringId] = useState(null);
 
   const art_annotations = artifacts.filter(
-    (a) => a.type?.toLowerCase() === "annotation"
+    (a) => a.type?.toLowerCase() === "annotation" && a.annotationText !== "[CENSORED]" && a.annotationText !== ""
+  );
+  const censored_annotations = artifacts.filter(
+    (a) => a.type?.toLowerCase() === "annotation" && (a.annotationText === "[CENSORED]")
+  );
+  const empty_annotations = artifacts.filter(
+    (a) => a.type?.toLowerCase() === "annotation" && (a.annotationText === "")
   );
 
   const openCensorModal = (artifact) => {
@@ -171,7 +177,9 @@ export default function Artifacts() {
     <AdminLayout>
       <h1 className="text-2xl font-bold mb-6 text-textPrimary">Artifacts</h1>
 
+      {/* Artifacts with text */}
       <section className="bg-surface border border-border rounded-lg p-6">
+          <h2 className="text-xl font-semibold mb-4 text-textPrimary">Artifacts with Text</h2>
         {art_annotations.length === 0 ? (
           <p className="text-textSecondary">No Artifacts found.</p>
         ) : (
@@ -196,7 +204,90 @@ export default function Artifacts() {
                     </span>{" "}
                     {a.id}
                   </div>
+                  {canModerate && (
+                    <button
+                      className="mt-2 md:mt-0 px-2 py-1 bg-blue-500 text-white rounded"
+                      onClick={() => openCensorModal(a)}
+                    >
+                      Censor / Delete
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+      
+      {/* Section for no text annotation */}
+      <section className="bg-surface border border-border rounded-lg p-6 mt-6">
+          <h2 className="text-xl font-semibold mb-4 text-textPrimary">Empty Annotations</h2>
+        {empty_annotations.length === 0 ? (
+          <p className="text-textSecondary">No Empty Artifacts found.</p>
+        ) : (
+          <ul className="space-y-2 text-textSecondary">
+            {empty_annotations.map((a) => {
+              const canModerate =
+                !!user && (a.ownerUid === user.uid || user.isAdmin === true);
 
+              return (
+                <li
+                  key={a.id}
+                  className="border-b border-border pb-2 mb-2 flex flex-col md:flex-row md:justify-between md:items-center"
+                >
+                  <div>
+                    <span className="text-textPrimary font-medium">
+                      Annotation:
+                    </span>{" "}
+                    {a.annotationText}
+                    <br />
+                    <span className="font-medium text-textPrimary">
+                      Annotation ID:
+                    </span>{" "}
+                    {a.id}
+                  </div>
+                  {canModerate && (
+                    <button
+                      className="mt-2 md:mt-0 px-2 py-1 bg-blue-500 text-white rounded"
+                      onClick={() => openCensorModal(a)}
+                    >
+                      Censor / Delete
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      {/* Censored annotations section */}
+      <section className="bg-surface border border-border rounded-lg p-6 mt-6">
+          <h2 className="text-xl font-semibold mb-4 text-textPrimary">Censored Annotations</h2>
+        {censored_annotations.length === 0 ? (
+          <p className="text-textSecondary">No Censored Artifacts found.</p>
+        ) : (
+          <ul className="space-y-2 text-textSecondary">
+            {censored_annotations.map((a) => {
+              const canModerate =
+                !!user && (a.ownerUid === user.uid || user.isAdmin === true);
+
+              return (
+                <li
+                  key={a.id}
+                  className="border-b border-border pb-2 mb-2 flex flex-col md:flex-row md:justify-between md:items-center"
+                >
+                  <div>
+                    <span className="text-textPrimary font-medium">
+                      Annotation:
+                    </span>{" "}
+                    {a.annotationText}
+                    <br />
+                    <span className="font-medium text-textPrimary">
+                      Annotation ID:
+                    </span>{" "}
+                    {a.id}
+                  </div>
                   {canModerate && (
                     <button
                       className="mt-2 md:mt-0 px-2 py-1 bg-blue-500 text-white rounded"

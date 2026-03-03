@@ -28,16 +28,29 @@ export default function Dashboard() {
           {annotations.length === 0 ? (
             <p className="text-textSecondary">No artifacts found.</p>
           ) : (
+            // <ul className="list-disc pl-6 space-y-2 text-textSecondary">
+            //   {annotations.map(a => (
+            //     <li key={a.id}>
+            //       <span className="font-medium text-textPrimary">Artifact ID:</span>{" "}
+            //       {a.id}
+            //       <br />
+            //       <span className="font-medium text-textPrimary">Annotation:</span>{" "}
+            //       {a.annotationText}
+            //     </li>
+            //   ))}
+            // </ul>
             <ul className="list-disc pl-6 space-y-2 text-textSecondary">
-              {annotations.map(a => (
-                <li key={a.id}>
-                  <span className="font-medium text-textPrimary">Artifact ID:</span>{" "}
-                  {a.id}
-                  <br />
-                  <span className="font-medium text-textPrimary">Annotation:</span>{" "}
-                  {a.annotationText}
-                </li>
-              ))}
+              {[...annotations]
+                .sort((a, b) => b.publishedAt - a.publishedAt)
+                .map(a => (
+                  <li key={a.id}>
+                    <span className="font-medium text-textPrimary">Artifact ID:</span>{" "}
+                    {a.id}
+                    <br />
+                    <span className="font-medium text-textPrimary">Annotation:</span>{" "}
+                    {a.annotationText}
+                  </li>
+                ))}
             </ul>
           )}
         </section>
