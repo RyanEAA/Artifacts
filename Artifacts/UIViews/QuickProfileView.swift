@@ -62,7 +62,7 @@ struct QuickProfileView: View {
                     statsRow
                     mapCard
                         .frame(maxWidth: .infinity)
-                        .frame(maxHeight: .infinity)
+//                        .frame(maxHeight: .infinity)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
@@ -249,7 +249,7 @@ struct QuickProfileView: View {
 
             ZStack(alignment: .bottomLeading) {
                 Map(coordinateRegion: $region, annotationItems: artifacts) { item in
-                    MapAnnotation(coordinate: item.coordinate) {
+                    MapAnnotation(coordinate: offsetCoordinate(for: item)) {
                         ArtifactPin(isSelected: selectedArtifact?.id == item.id)
                             .onTapGesture {
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -294,7 +294,8 @@ struct QuickProfileView: View {
                     .padding(12)
                 }
             }
-            .frame(height: 260)
+            .frame(maxHeight: .infinity)
+//            .frame(height: 260)
         }
         .padding(14)
         .background(ProfileCardBackground())
@@ -327,6 +328,32 @@ struct QuickProfileView: View {
             .cornerRadius(16)
         }
         .buttonStyle(.plain)
+    }
+    
+    private func duplicates(for item: ArtifactMapItem) -> [ArtifactMapItem] {
+        artifacts.filter {
+            $0.coordinate.latitude == item.coordinate.latitude &&
+            $0.coordinate.longitude == item.coordinate.longitude
+        }
+    }
+
+    private func offsetCoordinate(for item: ArtifactMapItem) -> CLLocationCoordinate2D {
+        let group = duplicates(for: item)
+
+        guard group.count > 1,
+              let index = group.firstIndex(where: { $0.id == item.id })
+        else {
+            return item.coordinate
+        }
+
+        let radius: Double = 0.00008
+        let angleStep = (2 * Double.pi) / Double(group.count)
+        let angle = angleStep * Double(index)
+
+        return CLLocationCoordinate2D(
+            latitude: item.coordinate.latitude + radius * cos(angle),
+            longitude: item.coordinate.longitude + radius * sin(angle)
+        )
     }
 
     private func startFriendsListener() {
@@ -559,7 +586,7 @@ private struct ArtifactPin: View {
                 .font(.system(size: isSelected ? 14 : 12, weight: .bold))
                 .foregroundColor(Color("MintGreen").opacity(0.92))
         }
-        .shadow(color: Color.black.opacity(0.45), radius: 8, x: 0, y: 6)
+//        .shadow(color: Color.black.opacity(0.45), radius: 8, x: 0, y: 6)
         .animation(.easeInOut(duration: 0.18), value: isSelected)
     }
 }
