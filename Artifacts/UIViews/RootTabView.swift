@@ -61,13 +61,7 @@ struct RootTabView: View {
             .padding(.leading, 20)
             .shadow(radius: 3)
 
-            // Profile screen overlay (slides up full frame)
-            if showProfile {
-                ProfileView(showProfile: $showProfile)
-                    .environmentObject(session)
-                    .transition(.move(edge: .bottom))
-                    .zIndex(1)
-            }
+
         }
     }
 }
