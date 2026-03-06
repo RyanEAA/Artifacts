@@ -16,6 +16,7 @@ class SceneManager: ObservableObject {
 
     @Published var isPersistenceAvailable: Bool = false
     @Published var anchorEntities: [AnchorEntity] = []
+    weak var arView: ARView?
 
     var shouldSaveSceneToFilesystem: Bool = false
     var shouldLoadSceneToFilesystem: Bool = false

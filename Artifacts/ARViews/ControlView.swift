@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 enum ControlModes: String, CaseIterable {
     case browse, scene
@@ -69,13 +70,10 @@ struct SceneButtons: View {
 
         Spacer()
 
-        // ControlView.swift → SceneButtons
-
         // LOAD (cloud)
         ControlButton(systemIconName: "icloud.and.arrow.down") {
             print("Load Scene Button Pressed")
 
-            // Re-fetch latest id on tap, then trigger load
             CloudSceneStore.fetchMostRecentSceneMeta { result in
                 switch result {
                 case .success(let meta):
@@ -83,7 +81,7 @@ struct SceneButtons: View {
                         DispatchQueue.main.async {
                             self.sceneManager.selectedCloudSceneId = meta.id
                             print("Attemping to load scene with id: \(meta.id)")
-                            self.sceneManager.shouldLoadSceneFromCloud = true  // ARViewContainer will do the actual load
+                            self.sceneManager.shouldLoadSceneFromCloud = true
                         }
                     } else {
                         print("No cloud scene found to load.")
@@ -93,16 +91,15 @@ struct SceneButtons: View {
                 }
             }
         }
-        .hidden(sceneManager.selectedCloudSceneId == nil) // shows once we have *some* id
+        .hidden(sceneManager.selectedCloudSceneId == nil)
 
         .onAppear {
-            // Prime (fetch-only) the newest id so the Load button shows up, but DON'T load yet
             CloudSceneStore.fetchMostRecentSceneMeta { result in
                 switch result {
                 case .success(let meta):
                     if let meta {
                         DispatchQueue.main.async {
-                            self.sceneManager.selectedCloudSceneId = meta.id // just set id; no load flag here
+                            self.sceneManager.selectedCloudSceneId = meta.id
                         }
                     }
                 case .failure(let e):
@@ -111,20 +108,16 @@ struct SceneButtons: View {
             }
         }
 
-
-
         Spacer()
 
         ControlButton(systemIconName: "trash") {
             print("clear scene button pressed")
-            // Remove all 3D anchor entities
             for anchorEntity in sceneManager.anchorEntities {
                 print("Removing anchoEntity with id: \(String(describing: anchorEntity.anchorIdentifier)))")
                 anchorEntity.removeFromParent()
             }
             sceneManager.anchorEntities.removeAll()
 
-            // Remove all 2D annotation views from the screen
             for (_, tv) in sceneManager.annotationViews {
                 tv.removeFromSuperview()
             }
@@ -132,7 +125,6 @@ struct SceneButtons: View {
             sceneManager.isEditing.removeAll()
             sceneManager.hasBeenTapped.removeAll()
 
-            // Tell ARViewContainer to also remove the underlying ARAnchors
             NotificationCenter.default.post(name: .clearAllAnnotations, object: nil)
         }
     }
@@ -146,6 +138,9 @@ struct ControlView: View {
     @Binding var showBrowse: Bool
     @Binding var showSettings: Bool
     @State private var showProfile = false
+    @State private var showCamera = false
+    @State private var capturedPhoto: UIImage? = nil
+    @EnvironmentObject var sceneManager: SceneManager
 
     var body: some View {
         VStack {
@@ -159,6 +154,41 @@ struct ControlView: View {
                         }
                 }
                 Spacer()
+
+                // Camera button — visible when controls are hidden
+                if !isControlsVisible {
+                    CameraButton {
+                        print("Camera Button Pressed...")
+                        // drawHierarchy with afterScreenUpdates:true schedules the
+                        // Metal/AR composite for the *next* display pass. We must
+                        // wait until that pass finishes before presenting the sheet,
+                        // otherwise the image is black on the first capture.
+                        // Strategy: render synchronously (afterScreenUpdates:true
+                        // blocks until the next CATransaction commit), store the
+                        // image, then open the sheet one run-loop tick later so
+                        // SwiftUI reads the already-populated capturedPhoto.
+
+                        guard let arView = sceneManager.arView else { return }
+
+                        arView.snapshot(saveToHDR: false) { image in
+                            guard let image else { return }
+
+                            DispatchQueue.main.async {
+                                self.capturedPhoto = image
+                                self.showCamera = true
+                            }
+                        }
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                    .sheet(isPresented: $showCamera) {
+                        if let photo = capturedPhoto {
+                            PhotoPreviewView(image: photo, isPresented: $showCamera)
+                                .preferredColorScheme(.dark)
+                                .presentationBackground(.black)
+                        }
+                    }
+                }
+
                 ControlVisibilityToggleButton(isControlsVisible: $isControlsVisible)
             }
             Spacer()
@@ -172,8 +202,143 @@ struct ControlView: View {
                 )
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: isControlsVisible)
     }
 }
+
+// MARK: - Camera Button
+
+struct CameraButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "camera")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(Color("MintGreen").opacity(0.92))
+                .frame(width: 44, height: 44)
+                .background(Color.white.opacity(0.06))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color("MintGreen").opacity(0.18), lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, 10)
+    }
+}
+
+// MARK: - Photo Preview Sheet
+
+struct PhotoPreviewView: View {
+    let image: UIImage
+    @Binding var isPresented: Bool
+    @State private var showShareSheet = false
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Top bar
+                HStack {
+                    Button(action: {
+                        isPresented = false
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 16, weight: .semibold))
+                            Text("Back")
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+                        .foregroundColor(Color("MintGreen"))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color.white.opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color("MintGreen").opacity(0.18), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    Text("Photo")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.white)
+
+                    Spacer()
+
+                    // Balance the back button width
+                    Color.clear
+                        .frame(width: 80, height: 44)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 16)
+
+                Divider()
+                    .background(Color.white.opacity(0.08))
+
+                // Photo preview
+                Spacer()
+
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(Color("MintGreen").opacity(0.12), lineWidth: 1)
+                    )
+                    .padding(.horizontal, 20)
+                    .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 8)
+
+                Spacer()
+
+                // Share button
+                Button(action: {
+                    showShareSheet = true
+                }) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 17, weight: .semibold))
+                        Text("Share")
+                            .font(.system(size: 17, weight: .semibold))
+                    }
+                    .foregroundColor(.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(Color("MintGreen"))
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .padding(.horizontal, 20)
+                }
+                .buttonStyle(.plain)
+                .padding(.bottom, 40)
+            }
+        }
+        .sheet(isPresented: $showShareSheet) {
+            ShareSheet(items: [image])
+        }
+    }
+}
+
+// MARK: - UIKit Share Sheet Bridge
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - Existing views (unchanged below)
 
 struct ControlVisibilityToggleButton: View{
     @Binding var isControlsVisible: Bool
@@ -200,8 +365,6 @@ struct ControlVisibilityToggleButton: View{
         }
         .padding(.top, 45)
         .padding(.trailing, 20)
-
-        
     }
 }
 
@@ -229,8 +392,6 @@ struct ProfileViewButton: View{
         }
         .padding(.top, 45)
         .padding(.leading, 20)
-
-        
     }
 }
 
@@ -294,9 +455,8 @@ struct ControlButtonBar: View{
                 SceneButtons()
             } else {
                 let _ = print("ControlButtonBar: showing BrowseButtons")
-                //BrowseButtons(showBrowse: $showBrowse, showSettings: $showSettings)
                 BrowseButtons(showBrowse: $showBrowse,
-                                              showSettings: $showSettings,
+                              showSettings: $showSettings,
                               showProfile: $showProfile)
             }
         }
@@ -344,7 +504,6 @@ struct MostRecentlyPlacedButton: View{
             }
         }){
             if let mostRecentlyPlacedModel = self.placementSettings.recentlyPlaced.last {
-                // colelction not empy
                 Image(uiImage: mostRecentlyPlacedModel.thumbnail)
                     .resizable()
                     .frame(width: 44, height: 44)
@@ -358,7 +517,6 @@ struct MostRecentlyPlacedButton: View{
                 Image(systemName: "clock.fill")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(Color("MintGreen").opacity(0.92))
-            
             }
         }
         .frame(width: 50, height: 50)
@@ -368,10 +526,5 @@ struct MostRecentlyPlacedButton: View{
                 .stroke(Color("MintGreen").opacity(0.16), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 16))
-
     }
 }
-
-//extension Notification.Name {
-//    static let clearAllAnnotations = Notification.Name("ClearAllAnnotationsNotification")
-//}

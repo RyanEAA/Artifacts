@@ -41,6 +41,9 @@ struct ARViewContainer: UIViewRepresentable {
             sessionSettings: sessionSettings,
             modelDeletionManager: modelDeletionManager
         )
+        
+        sceneManager.arView = arView
+        
         arView.session.delegate = context.coordinator
         context.coordinator.arView = arView
 

@@ -305,6 +305,7 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "This app uses the camera to display Augmented Reality objects";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Artifacts uses local network to share AR sessions with nearby friends.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app uses your location to show your current position on the map.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -340,6 +341,7 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "This app uses the camera to display Augmented Reality objects";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Artifacts uses local network to share AR sessions with nearby friends.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "This app uses your location to show your current position on the map.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
