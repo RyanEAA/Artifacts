@@ -40,10 +40,12 @@ class PlacementSettings: ObservableObject {
     // Models queued to be placed in the next scene update tick
     var modelsConfirmedForPlacement: [ModelAnchor] = []
 
+    @Published var isModelLoadInProgress: Bool = false
+    @Published var modelLoadMessage: String = ""
+
     // Retains the SceneEvents.Update subscriber
     var sceneObserver: Cancellable?
 }
-
 
 
 

@@ -9,7 +9,7 @@ import UIKit
 
 extension ARViewContainer {
 
-    private func currentSceneIdForArtifacts() -> String {
+    func currentSceneIdForArtifacts() -> String {
         if let id = self.sceneManager.selectedCloudSceneId, !id.isEmpty {
             return id
         }
@@ -54,7 +54,7 @@ extension ARViewContainer {
 
             if let anchor = modelAnchor.anchor {
                 self.place(modelEntity, for: anchor, in: arView)
-                saveModelToFirestore(modelName: modelAnchor.model.name, transform: anchor.transform)
+                self.sceneManager.markRestoredModelIfAwaiting()
 
             } else if let transform = getTransformForPlacement(in: arView) {
                 let anchorName = anchorNamePrefix + modelAnchor.model.name
@@ -74,7 +74,8 @@ extension ARViewContainer {
         clonedEntity.generateCollisionShapes(recursive: true)
         arView.installGestures([.rotation, .translation], for: clonedEntity)
 
-        let anchorEntity = AnchorEntity(plane: .any)
+        // Bind the rendered entity to the exact ARAnchor transform from placement/reload.
+        let anchorEntity = AnchorEntity(.anchor(identifier: anchor.identifier))
         anchorEntity.addChild(clonedEntity)
         arView.scene.addAnchor(anchorEntity)
 
@@ -82,46 +83,36 @@ extension ARViewContainer {
     }
 
     func getTransformForPlacement(in arView: ARView) -> simd_float4x4? {
-        guard let query = arView.makeRaycastQuery(
-            from: arView.center,
-            allowing: .estimatedPlane,
-            alignment: .any
-        ),
-        let result = arView.session.raycast(query).first else { return nil }
-        return result.worldTransform
+        return bestPlacementTransform(in: arView, from: arView.center)
     }
 
     func getTransformForPlacement(in arView: ARView, at point: CGPoint) -> simd_float4x4? {
-        guard let query = arView.makeRaycastQuery(
-            from: point,
-            allowing: .estimatedPlane,
-            alignment: .any
-        ),
-        let result = arView.session.raycast(query).first else { return nil }
-        return result.worldTransform
+        return bestPlacementTransform(in: arView, from: point)
+            ?? bestPlacementTransform(in: arView, from: arView.center)
+    }
+
+    private func bestPlacementTransform(in arView: ARView, from point: CGPoint) -> simd_float4x4? {
+        let targets: [ARRaycastQuery.Target] = [
+            .existingPlaneGeometry,
+            .existingPlaneInfinite,
+            .estimatedPlane
+        ]
+        let alignments: [ARRaycastQuery.TargetAlignment] = [.any, .horizontal, .vertical]
+
+        for target in targets {
+            for alignment in alignments {
+                guard let query = arView.makeRaycastQuery(
+                    from: point,
+                    allowing: target,
+                    alignment: alignment
+                ) else { continue }
+
+                if let result = arView.session.raycast(query).first {
+                    return result.worldTransform
+                }
+            }
+        }
+
+        return nil
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

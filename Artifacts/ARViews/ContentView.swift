@@ -34,6 +34,10 @@ struct ContentView: View {
                     ControlView(selectedControlMode: $selectedControlMode, isControlsVisible: $isControlsVisible, showBrowse: $showBrowse, showSettings: $showSettings)
                 }
             }
+
+            if placementSettings.isModelLoadInProgress {
+                ModelSelectionLoadingOverlay(text: placementSettings.modelLoadMessage)
+            }
         }
         .edgesIgnoringSafeArea(.all)
         .onAppear() {
@@ -52,6 +56,37 @@ struct ContentView: View {
         } else {
             print("Already signed in:", Auth.auth().currentUser?.uid ?? "nil")
         }
+    }
+}
+
+private struct ModelSelectionLoadingOverlay: View {
+    let text: String
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.20)
+                .ignoresSafeArea()
+
+            VStack(spacing: 12) {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: Color("MintGreen")))
+                    .scaleEffect(1.12)
+
+                Text(text.isEmpty ? "Preparing model..." : text)
+                    .font(.custom("Poppins-SemiBold", size: 14))
+                    .foregroundColor(.white.opacity(0.92))
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 16)
+            .background(Color.black.opacity(0.78))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Color("MintGreen").opacity(0.22), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+        }
+        .allowsHitTesting(true)
     }
 }
 

@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UIKit
+import RealityKit
 
 enum ControlModes: String, CaseIterable {
     case browse, scene
@@ -63,16 +64,21 @@ struct SceneButtons: View {
     var body: some View {
         // SAVE (cloud)
         ControlButton(systemIconName: "icloud.and.arrow.up") {
+            guard !sceneManager.isPersistenceInProgress else { return }
             print("Save Scene Button Pressed..")
             sceneManager.shouldSaveSceneToCloud = true
+            sceneManager.beginPersistenceProgress("Saving scene...")
         }
         .hidden(!sceneManager.isPersistenceAvailable)
+        .disabled(sceneManager.isPersistenceInProgress)
 
         Spacer()
 
         // LOAD (cloud)
         ControlButton(systemIconName: "icloud.and.arrow.down") {
+            guard !sceneManager.isPersistenceInProgress else { return }
             print("Load Scene Button Pressed")
+            sceneManager.beginPersistenceProgress("Finding latest scene...")
 
             CloudSceneStore.fetchMostRecentSceneMeta { result in
                 switch result {
@@ -81,17 +87,29 @@ struct SceneButtons: View {
                         DispatchQueue.main.async {
                             self.sceneManager.selectedCloudSceneId = meta.id
                             print("Attemping to load scene with id: \(meta.id)")
+                            self.sceneManager.updatePersistenceProgress("Loading scene...")
                             self.sceneManager.shouldLoadSceneFromCloud = true
                         }
                     } else {
                         print("No cloud scene found to load.")
+                        self.sceneManager.endPersistenceProgress()
+                        self.sceneManager.postPersistenceNotice(
+                            "No saved scene found to load.",
+                            style: .info
+                        )
                     }
                 case .failure(let e):
                     print("Failed to fetch latest scene meta on tap:", e)
+                    self.sceneManager.endPersistenceProgress()
+                    self.sceneManager.postPersistenceNotice(
+                        "Failed to find a scene to load.",
+                        style: .error
+                    )
                 }
             }
         }
         .hidden(sceneManager.selectedCloudSceneId == nil)
+        .disabled(sceneManager.isPersistenceInProgress)
 
         .onAppear {
             CloudSceneStore.fetchMostRecentSceneMeta { result in
@@ -111,6 +129,7 @@ struct SceneButtons: View {
         Spacer()
 
         ControlButton(systemIconName: "trash") {
+            guard !sceneManager.isPersistenceInProgress else { return }
             print("clear scene button pressed")
             for anchorEntity in sceneManager.anchorEntities {
                 print("Removing anchoEntity with id: \(String(describing: anchorEntity.anchorIdentifier)))")
@@ -126,7 +145,9 @@ struct SceneButtons: View {
             sceneManager.hasBeenTapped.removeAll()
 
             NotificationCenter.default.post(name: .clearAllAnnotations, object: nil)
+            NotificationCenter.default.post(name: .clearAllDrawingStrokes, object: nil)
         }
+        .disabled(sceneManager.isPersistenceInProgress)
     }
 }
 
@@ -199,8 +220,19 @@ struct ControlView: View {
 
                 Spacer()
             }
+
+            if sceneManager.isPersistenceInProgress {
+                PersistenceLoadingOverlay(text: sceneManager.persistenceProgressText)
+            }
+
+            if let notice = sceneManager.persistenceNotice {
+                PersistenceCenteredNoticeOverlay(notice: notice)
+                    .transition(.opacity.combined(with: .scale))
+            }
         }
         .animation(.easeInOut(duration: 0.2), value: isControlsVisible)
+        .animation(.easeInOut(duration: 0.2), value: sceneManager.isPersistenceInProgress)
+        .animation(.easeInOut(duration: 0.2), value: sceneManager.persistenceNotice?.id)
         .sheet(isPresented: $showCamera) {
             if let photo = capturedPhoto {
                 PhotoPreviewView(image: photo, isPresented: $showCamera)
@@ -221,8 +253,47 @@ private extension ControlView {
             guard let image else { return }
 
             DispatchQueue.main.async {
-                capturedPhoto = image
+                capturedPhoto = composeSnapshotWithAnnotations(baseImage: image, in: arView)
                 showCamera = true
+            }
+        }
+    }
+
+    func composeSnapshotWithAnnotations(baseImage: UIImage, in arView: ARView) -> UIImage {
+        let imageSize = CGSize(width: baseImage.size.width, height: baseImage.size.height)
+        let viewSize = arView.bounds.size
+        guard imageSize.width > 0, imageSize.height > 0, viewSize.width > 0, viewSize.height > 0 else {
+            return baseImage
+        }
+
+        let scaleX = imageSize.width / viewSize.width
+        let scaleY = imageSize.height / viewSize.height
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = baseImage.scale
+        format.opaque = true
+
+        let renderer = UIGraphicsImageRenderer(size: imageSize, format: format)
+        return renderer.image { _ in
+            baseImage.draw(in: CGRect(origin: .zero, size: imageSize))
+
+            for tv in sceneManager.annotationViews.values {
+                guard !tv.isHidden, tv.alpha > 0.01 else { continue }
+                let frameInARView = tv.convert(tv.bounds, to: arView)
+                guard frameInARView.intersects(arView.bounds) else { continue }
+
+                let scaledFrame = CGRect(
+                    x: frameInARView.origin.x * scaleX,
+                    y: frameInARView.origin.y * scaleY,
+                    width: frameInARView.size.width * scaleX,
+                    height: frameInARView.size.height * scaleY
+                )
+
+                UIGraphicsGetCurrentContext()?.saveGState()
+                UIGraphicsGetCurrentContext()?.translateBy(x: scaledFrame.origin.x, y: scaledFrame.origin.y)
+                UIGraphicsGetCurrentContext()?.scaleBy(x: scaleX, y: scaleY)
+                tv.layer.render(in: UIGraphicsGetCurrentContext()!)
+                UIGraphicsGetCurrentContext()?.restoreGState()
             }
         }
     }
@@ -472,13 +543,10 @@ struct ControlButtonBar: View{
     @Binding var selectedControlMode: Int
     
     var body: some View {
-        let _ = print("ControlButtonBar: rendering with selectedControlMode = \(selectedControlMode)")
         HStack(alignment: .center) {
             if selectedControlMode == 1 {
-                let _ = print("ControlButtonBar: showing SceneButtons")
                 SceneButtons()
             } else {
-                let _ = print("ControlButtonBar: showing BrowseButtons")
                 BrowseButtons(showBrowse: $showBrowse,
                               showSettings: $showSettings,
                               showProfile: $showProfile)
@@ -550,5 +618,86 @@ struct MostRecentlyPlacedButton: View{
                 .stroke(Color("MintGreen").opacity(0.16), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+private struct PersistenceLoadingOverlay: View {
+    let text: String
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.30)
+                .ignoresSafeArea()
+
+            VStack(spacing: 14) {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: Color("MintGreen")))
+                    .scaleEffect(1.2)
+
+                Text(text.isEmpty ? "Working..." : text)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.92))
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 26)
+            .padding(.vertical, 20)
+            .background(Color.black.opacity(0.78))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Color("MintGreen").opacity(0.26), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+        }
+        .allowsHitTesting(true)
+    }
+}
+
+private struct PersistenceCenteredNoticeOverlay: View {
+    let notice: PersistenceNotice
+
+    private var accent: Color {
+        switch notice.style {
+        case .info:
+            return Color("MintGreen")
+        case .success:
+            return Color("MintGreen")
+        case .error:
+            return Color.red
+        }
+    }
+
+    private var icon: String {
+        switch notice.style {
+        case .info:
+            return "info.circle.fill"
+        case .success:
+            return "checkmark.circle.fill"
+        case .error:
+            return "xmark.octagon.fill"
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            VStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundColor(accent.opacity(0.95))
+                Text(notice.message)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.92))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+            }
+            .padding(.horizontal, 26)
+            .padding(.vertical, 20)
+            .background(Color.black.opacity(0.78))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(accent.opacity(0.3), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+        }
+        .allowsHitTesting(false)
     }
 }

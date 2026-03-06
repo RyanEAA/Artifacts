@@ -70,7 +70,7 @@ extension ARViewContainer {
                     guard let model = parent.modelsViewModel.models
                         .first(where: { $0.name == modelName }) else {
                         print("Unable to retrieve model from modelsViewModel")
-                        return
+                        continue
                     }
 
                     if model.modelEntity == nil {
@@ -83,6 +83,10 @@ extension ARViewContainer {
                                 print("Adding modelAnchor with name: \(model.name)")
                             }
                         }
+                    } else {
+                        let modelAnchor = ModelAnchor(model: model, anchor: anchor)
+                        self.parent.placementSettings.modelsConfirmedForPlacement
+                            .append(modelAnchor)
                     }
                 }
             }
@@ -91,8 +95,10 @@ extension ARViewContainer {
         // MARK: - ARSessionDelegate: Frame Update (drives smooth drawing)
 
         func session(_ session: ARSession, didUpdate frame: ARFrame) {
+            guard case .draw = parent.placementSettings.selectedTool else { return }
+            guard currentFingerPosition != nil else { return }
             DispatchQueue.main.async {
-                self.tickDrawing(frame: frame)
+                self.tickDrawing()
             }
         }
 

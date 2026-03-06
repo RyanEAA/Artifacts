@@ -22,6 +22,13 @@ struct ArtifactMapItem: Identifiable, Equatable {
     }
 }
 
+struct DrawingArtifactRecord {
+    let artifactId: String
+    let points: [SIMD3<Float>]
+    let colorRGBA: SIMD4<Float>
+    let brushSize: Float
+}
+
 final class ArtifactsService {
 
     static let shared = ArtifactsService()
@@ -234,6 +241,100 @@ final class ArtifactsService {
         }
 
         try await db.collection("artifacts").document(artifactId).setData(doc, merge: true)
+    }
+
+    func createDrawingArtifact(
+        artifactId: String,
+        sceneId: String,
+        points: [SIMD3<Float>],
+        colorRGBA: SIMD4<Float>,
+        brushSize: Float,
+        coordinate: CLLocationCoordinate2D? = nil
+    ) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "ArtifactsService", code: 401, userInfo: [
+                NSLocalizedDescriptionKey: "User is not authenticated"
+            ])
+        }
+        guard !points.isEmpty else { return }
+
+        let pointMaps: [[String: Double]] = points.map { point in
+            [
+                "x": Double(point.x),
+                "y": Double(point.y),
+                "z": Double(point.z)
+            ]
+        }
+        let colorArray = [
+            Double(colorRGBA.x),
+            Double(colorRGBA.y),
+            Double(colorRGBA.z),
+            Double(colorRGBA.w)
+        ]
+
+        var doc: [String: Any] = [
+            "id": artifactId,
+            "ownerUid": uid,
+            "sceneId": sceneId,
+            "type": "drawing",
+            "drawingPoints": pointMaps,
+            "drawingColorRGBA": colorArray,
+            "drawingBrushSize": Double(brushSize),
+            "published": false,
+            "createdAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+
+        if let coordinate {
+            doc["location"] = GeoPoint(latitude: coordinate.latitude, longitude: coordinate.longitude)
+            doc["latitude"] = coordinate.latitude
+            doc["longitude"] = coordinate.longitude
+        }
+
+        try await db.collection("artifacts").document(artifactId).setData(doc, merge: true)
+    }
+
+    func fetchMyDrawingArtifacts(sceneId: String) async throws -> [DrawingArtifactRecord] {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "ArtifactsService", code: 401, userInfo: [
+                NSLocalizedDescriptionKey: "User is not authenticated"
+            ])
+        }
+        guard !sceneId.isEmpty else { return [] }
+
+        let snap = try await db.collection("artifacts")
+            .whereField("ownerUid", isEqualTo: uid)
+            .whereField("sceneId", isEqualTo: sceneId)
+            .whereField("type", isEqualTo: "drawing")
+            .getDocuments()
+
+        let records: [DrawingArtifactRecord] = snap.documents.compactMap { doc in
+            let data = doc.data()
+            let pointMaps = data["drawingPoints"] as? [[String: Double]] ?? []
+            let points: [SIMD3<Float>] = pointMaps.compactMap { p in
+                guard let x = p["x"], let y = p["y"], let z = p["z"] else { return nil }
+                return SIMD3<Float>(Float(x), Float(y), Float(z))
+            }
+            guard !points.isEmpty else { return nil }
+
+            let colorArray = data["drawingColorRGBA"] as? [Double] ?? [1, 1, 1, 1]
+            let color = SIMD4<Float>(
+                Float(colorArray.indices.contains(0) ? colorArray[0] : 1),
+                Float(colorArray.indices.contains(1) ? colorArray[1] : 1),
+                Float(colorArray.indices.contains(2) ? colorArray[2] : 1),
+                Float(colorArray.indices.contains(3) ? colorArray[3] : 1)
+            )
+            let brush = Float(data["drawingBrushSize"] as? Double ?? 0.004)
+
+            return DrawingArtifactRecord(
+                artifactId: doc.documentID,
+                points: points,
+                colorRGBA: color,
+                brushSize: brush
+            )
+        }
+
+        return records
     }
 
     // MARK: - Helpers

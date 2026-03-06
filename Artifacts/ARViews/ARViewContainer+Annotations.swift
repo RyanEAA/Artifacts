@@ -18,15 +18,6 @@ extension ARViewContainer {
 
 extension ARViewContainer {
 
-    private func currentSceneIdForArtifacts() -> String {
-        if let id = self.sceneManager.selectedCloudSceneId, !id.isEmpty {
-            return id
-        }
-        let newId = UUID().uuidString
-        self.sceneManager.selectedCloudSceneId = newId
-        return newId
-    }
-
     func startRealtimeAnnotationSyncIfNeeded(on arView: ARView) {
         guard let sceneId = self.sceneManager.selectedCloudSceneId, !sceneId.isEmpty else { return }
 
@@ -145,10 +136,13 @@ extension ARViewContainer {
         let hasText = !data.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         self.sceneManager.hasBeenTapped[data.id] = hasText
         animatePopIn(tv)
+        self.sceneManager.markRestoredAnnotationIfAwaiting()
     }
 
     func layoutAnnotations(on arView: ARView) {
         guard let frame = arView.session.currentFrame else { return }
+        let worldToCamera = simd_inverse(frame.camera.transform)
+
         for (id, anchor) in self.sceneManager.annotationAnchors {
             let pos = SIMD3<Float>(
                 anchor.transform.columns.3.x,
@@ -157,17 +151,20 @@ extension ARViewContainer {
             )
             if let p = arView.project(pos) {
                 if let tv = self.sceneManager.annotationViews[id] {
-                    let camZ = simd_mul(
-                        frame.camera.transform,
-                        SIMD4<Float>(pos.x, pos.y, pos.z, 1)
-                    ).z
-                    tv.isHidden = camZ > 0
+                    let cameraSpace = simd_mul(worldToCamera, SIMD4<Float>(pos.x, pos.y, pos.z, 1))
+                    let isInFrontOfCamera = cameraSpace.z < 0
+                    tv.isHidden = !isInFrontOfCamera
                     tv.bounds.size = CGSize(width: annotationWidth, height: annotationHeight)
                     tv.center = CGPoint(x: CGFloat(p.x), y: CGFloat(p.y) - 20)
-                    if let btn = self.sceneManager.deleteButtons[id], !btn.isHidden {
-                        let f = tv.frame
-                        btn.bounds.size = CGSize(width: 80, height: 32)
-                        btn.center = CGPoint(x: f.midX, y: f.maxY + 8 + btn.bounds.height / 2)
+
+                    if let btn = self.sceneManager.deleteButtons[id] {
+                        let shouldShowDelete = isInFrontOfCamera && self.shouldShowDeleteButton(for: id)
+                        btn.isHidden = !shouldShowDelete
+                        if shouldShowDelete {
+                            let f = tv.frame
+                            btn.bounds.size = CGSize(width: 80, height: 32)
+                            btn.center = CGPoint(x: f.midX, y: f.maxY + 8 + btn.bounds.height / 2)
+                        }
                     }
                 }
             } else {
@@ -175,6 +172,13 @@ extension ARViewContainer {
                 self.sceneManager.deleteButtons[id]?.isHidden = true
             }
         }
+    }
+
+    private func shouldShowDeleteButton(for id: UUID) -> Bool {
+        if self.sceneManager.isEditing[id] == true { return false }
+        guard let tv = self.sceneManager.annotationViews[id] else { return false }
+        let trimmed = tv.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty || tv.text == "Tap to Edit"
     }
 
     func encodeAnnotation(_ data: AnnotationData) -> String {
