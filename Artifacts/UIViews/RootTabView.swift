@@ -13,9 +13,7 @@ struct RootTabView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // Home view (main screen)
-            HomeARView()
-                .ignoresSafeArea()
+
             
             // Profile button (top-left)
             Button {
