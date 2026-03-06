@@ -137,74 +137,98 @@ struct ControlView: View {
     @Binding var isControlsVisible: Bool
     @Binding var showBrowse: Bool
     @Binding var showSettings: Bool
+
     @State private var showProfile = false
     @State private var showCamera = false
-    @State private var capturedPhoto: UIImage? = nil
+    @State private var capturedPhoto: UIImage?
+
     @EnvironmentObject var sceneManager: SceneManager
 
     var body: some View {
-        VStack {
-            HStack {
-                if isControlsVisible {
-                    ProfileViewButton(isProfileVisible: $showProfile)
-                        .sheet(isPresented: $showProfile) {
-                            QuickProfileView()
-                                .preferredColorScheme(.dark)
-                                .presentationBackground(.black)
-                        }
-                }
-                Spacer()
+        ZStack {
 
-                // Camera button — visible when controls are hidden
-                if !isControlsVisible {
-                    CameraButton {
-                        print("Camera Button Pressed...")
-                        // drawHierarchy with afterScreenUpdates:true schedules the
-                        // Metal/AR composite for the *next* display pass. We must
-                        // wait until that pass finishes before presenting the sheet,
-                        // otherwise the image is black on the first capture.
-                        // Strategy: render synchronously (afterScreenUpdates:true
-                        // blocks until the next CATransaction commit), store the
-                        // image, then open the sheet one run-loop tick later so
-                        // SwiftUI reads the already-populated capturedPhoto.
-
-                        guard let arView = sceneManager.arView else { return }
-
-                        arView.snapshot(saveToHDR: false) { image in
-                            guard let image else { return }
-
-                            DispatchQueue.main.async {
-                                self.capturedPhoto = image
-                                self.showCamera = true
-                            }
-                        }
-                    }
-                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
-                    .sheet(isPresented: $showCamera) {
-                        if let photo = capturedPhoto {
-                            PhotoPreviewView(image: photo, isPresented: $showCamera)
-                                .preferredColorScheme(.dark)
-                                .presentationBackground(.black)
-                        }
-                    }
-                }
-
-                ControlVisibilityToggleButton(isControlsVisible: $isControlsVisible)
-            }
-            Spacer()
+            // MARK: Controls Mode
             if isControlsVisible {
-                ControlModePicker(selectedControlMode: $selectedControlMode)
-                ControlButtonBar(
-                    showBrowse: $showBrowse,
-                    showSettings: $showSettings,
-                    showProfile: $showProfile,
-                    selectedControlMode: $selectedControlMode
-                )
+                VStack {
+
+                    HStack {
+                        ProfileViewButton(isProfileVisible: $showProfile)
+                            .sheet(isPresented: $showProfile) {
+                                QuickProfileView()
+                                    .preferredColorScheme(.dark)
+                                    .presentationBackground(.black)
+                            }
+
+                        Spacer()
+                    }
+                    .padding(.top, 10)
+                    .padding(.leading, 20)
+
+                    Spacer()
+
+                    ControlModePicker(selectedControlMode: $selectedControlMode)
+
+                    ControlButtonBar(
+                        showBrowse: $showBrowse,
+                        showSettings: $showSettings,
+                        showProfile: $showProfile,
+                        selectedControlMode: $selectedControlMode
+                    )
+                }
+            }
+
+            // MARK: Camera Mode
+            else {
+                VStack {
+                    Spacer()
+
+                    CameraButton(action: takeSnapshot)
+                        .padding(.bottom, 40)
+                }
+            }
+
+            // MARK: Visibility Toggle (ALWAYS VISIBLE)
+            VStack {
+                HStack {
+                    Spacer()
+
+                    ControlVisibilityToggleButton(isControlsVisible: $isControlsVisible)
+                }
+                .padding(.top, 10)
+                .padding(.trailing, 20)
+
+                Spacer()
             }
         }
         .animation(.easeInOut(duration: 0.2), value: isControlsVisible)
+        .sheet(isPresented: $showCamera) {
+            if let photo = capturedPhoto {
+                PhotoPreviewView(image: photo, isPresented: $showCamera)
+                    .preferredColorScheme(.dark)
+                    .presentationBackground(.black)
+            }
+        }
     }
 }
+
+private extension ControlView {
+
+    func takeSnapshot() {
+
+        guard let arView = sceneManager.arView else { return }
+
+        arView.snapshot(saveToHDR: false) { image in
+            guard let image else { return }
+
+            DispatchQueue.main.async {
+                capturedPhoto = image
+                showCamera = true
+            }
+        }
+    }
+}
+
+
 
 // MARK: - Camera Button
 
