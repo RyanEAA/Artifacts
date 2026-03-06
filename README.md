@@ -8,27 +8,26 @@ This repository documents both the **implementation** and the **system architect
 ---
 ## Pictures
 ### Login View
-<img width="642" height="1389" alt="IMG_0905" src="https://github.com/user-attachments/assets/4b0c5adc-8c6a-45fc-a619-c73099121d17" />
+<img width="642" height="1389" alt="IMG_0905" src="https://github.com/user-attachments/assets/4b0c5adc-8c6a-45fc-a619-c73099121d17"  style="width:25%; height:auto;"/>
 
 ### Profile View
-<img width="642" height="1389" alt="IMG_0907" src="https://github.com/user-attachments/assets/98ac7629-31a1-4eba-8f6b-8a6d1e2da26d" />
+<img width="642" height="1389" alt="IMG_0907" src="https://github.com/user-attachments/assets/98ac7629-31a1-4eba-8f6b-8a6d1e2da26d"  style="width:25%; height:auto;"/>
 
 ### Settings View
-<img width="642" height="1389" alt="IMG_0908" src="https://github.com/user-attachments/assets/5dda5012-a756-4599-9ec2-074a04d01a8b" />
+<img width="642" height="1389" alt="IMG_0908" src="https://github.com/user-attachments/assets/5dda5012-a756-4599-9ec2-074a04d01a8b"  style="width:25%; height:auto;"/>
 
 
 ### AR Objects (Artifact) Browse View
-<img width="642" height="1389" alt="IMG_0906" src="https://github.com/user-attachments/assets/8c504e75-b50a-4327-8229-9285de44ec6c" />
+<img width="642" height="1389" alt="IMG_0906" src="https://github.com/user-attachments/assets/8c504e75-b50a-4327-8229-9285de44ec6c"  style="width:25%; height:auto;"/>
 
 ### 3D Chameleon Artifact
-<img width="642" height="1389" alt="IMG_0910" src="https://github.com/user-attachments/assets/7233bb9b-19e0-4587-b182-4ea914e94c46" />
+<img width="642" height="1389" alt="IMG_0910" src="https://github.com/user-attachments/assets/7233bb9b-19e0-4587-b182-4ea914e94c46"  style="width:25%; height:auto;"/>
 
 ### 2D Annotation Artifact
-<img width="642" height="1389" alt="IMG_0911" src="https://github.com/user-attachments/assets/cb928f41-ff2d-4bb0-976a-e5e6e9e5e2b4" />
+<img width="642" height="1389" alt="IMG_0911" src="https://github.com/user-attachments/assets/cb928f41-ff2d-4bb0-976a-e5e6e9e5e2b4"  style="width:25%; height:auto;" />
 
 ### Drawing Artifact
-<img width="642" height="1389" alt="IMG_0914" src="https://github.com/user-attachments/assets/0445d986-3d40-431d-bcf1-ac8bb58a3cc0" />
-
+<img width="642" height="1389" alt="IMG_0914" src="https://github.com/user-attachments/assets/0445d986-3d40-431d-bcf1-ac8bb58a3cc0"  style="width:25%; height:auto;"/>
 
 --
 

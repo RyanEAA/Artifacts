@@ -77,6 +77,7 @@ extension ARViewContainer {
 
     private func loadFromCloud(arView: CustomARView) {
         self.sceneManager.shouldLoadSceneFromCloud = false
+        self.sceneManager.stopAnnotationTextListener()
         self.modelsViewModel.clearModelEntityFromMemory()
         self.sceneManager.anchorEntities.removeAll(keepingCapacity: true)
 
@@ -95,6 +96,7 @@ extension ARViewContainer {
         let targetSceneId: String? = self.sceneManager.selectedCloudSceneId
 
         if let id = targetSceneId {
+            startRealtimeAnnotationSyncIfNeeded(on: arView)
             Task {
                 do {
                     let overrides = try await ArtifactsService.shared.fetchMyAnnotationTextOverrides(sceneId: id)
@@ -119,6 +121,7 @@ extension ARViewContainer {
                 switch result {
                 case .success(let payload):
                     self.sceneManager.selectedCloudSceneId = payload.id
+                    self.startRealtimeAnnotationSyncIfNeeded(on: arView)
 
                     Task {
                         do {

@@ -116,6 +116,37 @@ final class ArtifactsService {
         return out
     }
 
+    /// Real-time listener for annotation text by scene.
+    /// Returns a Firestore listener that must be retained and removed by caller.
+    func listenMyAnnotationTextOverrides(
+        sceneId: String,
+        completion: @escaping ([String: String]) -> Void
+    ) -> ListenerRegistration {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            completion([:])
+            return db.collection("artifacts").addSnapshotListener { _, _ in }
+        }
+        guard !sceneId.isEmpty else { return db.collection("artifacts").addSnapshotListener { _, _ in } }
+        return db.collection("artifacts")
+            .whereField("ownerUid", isEqualTo: uid)
+            .whereField("sceneId", isEqualTo: sceneId)
+            .whereField("type", isEqualTo: "annotation")
+            .addSnapshotListener(includeMetadataChanges: true) { snap, err in
+                if let err {
+                    print("⚠️ listenMyAnnotationTextOverrides error:", err.localizedDescription)
+                    completion([:])
+                    return
+                }
+
+                var out: [String: String] = [:]
+                for doc in snap?.documents ?? [] {
+                    let text = (doc.data()["annotationText"] as? String) ?? ""
+                    out[doc.documentID] = text
+                }
+                completion(out)
+            }
+    }
+
     // MARK: - Create
 
     func createAnnotationArtifact(

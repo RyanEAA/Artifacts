@@ -46,6 +46,7 @@ struct ARViewContainer: UIViewRepresentable {
         
         arView.session.delegate = context.coordinator
         context.coordinator.arView = arView
+        startRealtimeAnnotationSyncIfNeeded(on: arView)
 
         // Layout projected 2D annotations every frame
         self.sceneManager.annotationsSceneObserver = arView.scene.subscribe(
@@ -109,6 +110,7 @@ struct ARViewContainer: UIViewRepresentable {
 
     static func dismantleUIView(_ uiView: CustomARView, coordinator: Coordinator) {
         uiView.session.pause()
+        coordinator.parent.sceneManager.stopAnnotationTextListener()
         NotificationCenter.default.removeObserver(uiView, name: .pauseARSession, object: nil)
         NotificationCenter.default.removeObserver(uiView, name: .resumeARSession, object: nil)
     }
