@@ -187,19 +187,7 @@ struct QuickProfileView: View {
 
             Spacer()
 
-            Button {
-                showFullMap = true
-            } label: {
-                Image(systemName: "map.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(Color.black.opacity(0.92))
-                    .frame(width: 38, height: 38)
-                    .background(Color("MintGreen"))
-                    .clipShape(Circle())
-                    .shadow(color: Color.black.opacity(0.30), radius: 10, x: 0, y: 8)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Open full map")
+
         }
         .padding(14)
         .background(ProfileCardBackground())
