@@ -24,6 +24,7 @@ struct ArtifactMapItem: Identifiable, Equatable {
 
 struct DrawingArtifactRecord {
     let artifactId: String
+    let ownerUid: String
     let points: [SIMD3<Float>]
     let colorRGBA: SIMD4<Float>
     let brushSize: Float
@@ -31,12 +32,14 @@ struct DrawingArtifactRecord {
 
 struct ModelArtifactRecord {
     let artifactId: String
+    let ownerUid: String
     let modelName: String
     let transform: simd_float4x4
 }
 
 struct AnnotationArtifactRecord {
     let artifactId: String
+    let ownerUid: String
     let annotationText: String
     let transform: simd_float4x4
 }
@@ -593,6 +596,7 @@ final class ArtifactsService {
 
             return DrawingArtifactRecord(
                 artifactId: doc.documentID,
+                ownerUid: data["ownerUid"] as? String ?? uid,
                 points: points,
                 colorRGBA: color,
                 brushSize: brush
@@ -637,6 +641,7 @@ final class ArtifactsService {
 
             return DrawingArtifactRecord(
                 artifactId: doc.documentID,
+                ownerUid: data["ownerUid"] as? String ?? ownerUid,
                 points: points,
                 colorRGBA: color,
                 brushSize: brush
@@ -667,6 +672,7 @@ final class ArtifactsService {
             guard let transform = Self.transformMatrix(from: data["transform"]) else { return nil }
             return ModelArtifactRecord(
                 artifactId: doc.documentID,
+                ownerUid: data["ownerUid"] as? String ?? ownerUid,
                 modelName: modelName,
                 transform: transform
             )
@@ -694,6 +700,7 @@ final class ArtifactsService {
             guard let transform = Self.transformMatrix(from: data["transform"]) else { return nil }
             return AnnotationArtifactRecord(
                 artifactId: doc.documentID,
+                ownerUid: data["ownerUid"] as? String ?? ownerUid,
                 annotationText: text,
                 transform: transform
             )
@@ -823,5 +830,15 @@ final class ArtifactsService {
         guard !sceneId.isEmpty else { return nil }
         let doc = try await db.collection("scenes").document(sceneId).getDocument()
         return doc.data()?["ownerUid"] as? String
+    }
+
+    func fetchUsername(for uid: String) async throws -> String? {
+        guard !uid.isEmpty else { return nil }
+        let doc = try await db.collection("users").document(uid).getDocument()
+        return doc.data()?["username"] as? String
+    }
+
+    func fetchSceneOwnerUid(sceneId: String) async throws -> String? {
+        try await sceneOwnerUid(for: sceneId)
     }
 }

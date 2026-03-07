@@ -12,6 +12,7 @@ import ARKit
 import Combine
 import UIKit
 import FirebaseFirestore
+import simd
 
 class SceneManager: ObservableObject {
 
@@ -26,6 +27,7 @@ class SceneManager: ObservableObject {
     var shouldLoadSceneFromCloud: Bool = false
     var selectedCloudSceneId: String?
     var selectedCloudSceneStoragePath: String?
+    var selectedSceneOwnerUid: String?
 
     lazy var persistenceUrl: URL = {
         do {
@@ -46,6 +48,11 @@ class SceneManager: ObservableObject {
 
     @Published var annotationViews: [UUID: UITextView] = [:]
     @Published var deleteButtons: [UUID: UIButton] = [:]
+    @Published var artifactOwnerBadgeViews: [String: UILabel] = [:]
+    var artifactOwnerBadgeWorldPositions: [String: SIMD3<Float>] = [:]
+    var artifactOwnerBadgeOffsetsY: [String: CGFloat] = [:]
+    var artifactOwnerUsernames: [String: String] = [:]
+    var artifactOwnerUsernameLookupsInFlight: Set<String> = []
 
     var annotationAnchors: [UUID: ARAnchor] = [:]
     var isEditing: [UUID: Bool] = [:]

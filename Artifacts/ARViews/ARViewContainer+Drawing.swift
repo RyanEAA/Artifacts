@@ -27,6 +27,7 @@ import RealityKit
 import ARKit
 import UIKit
 import simd
+import FirebaseAuth
 
 // MARK: - SIMD3 math helpers (mirrors ARPaint's SCNVector3 extensions)
 
@@ -177,12 +178,12 @@ extension ARViewContainer {
         return camPos + rayWorld * drawDepth
     }
 
-    func saveDrawingStrokeToFirestore(_ stroke: DrawingManager.StrokeRecord) {
-        let sceneId = currentSceneIdForArtifacts()
+    func saveDrawingStrokeToFirestore(_ stroke: DrawingManager.StrokeRecord, on arView: ARView) {
         let coordinate = LocationService.shared.currentCoordinate
 
         Task {
             do {
+                let sceneId = try await writableSceneIdForArtifactWrites()
                 try await ArtifactsService.shared.createDrawingArtifact(
                     artifactId: stroke.artifactId,
                     sceneId: sceneId,
@@ -191,6 +192,15 @@ extension ARViewContainer {
                     brushSize: stroke.brushSize,
                     coordinate: coordinate
                 )
+                if let first = stroke.points.first {
+                    self.upsertArtifactOwnerBadge(
+                        artifactId: stroke.artifactId,
+                        ownerUid: Auth.auth().currentUser?.uid ?? "",
+                        worldPosition: first,
+                        yOffset: -28,
+                        on: arView
+                    )
+                }
             } catch {
                 print("⚠️ createDrawingArtifact error:", error.localizedDescription)
             }
@@ -198,10 +208,17 @@ extension ARViewContainer {
     }
 
     func clearAllDrawings(in arView: ARView) {
+        let drawingArtifactIds = self.sceneManager.drawingManager.strokeGroups.map(\.artifactId)
         self.sceneManager.drawingManager.clearAll(in: arView.scene)
         self.sceneManager.drawAnchorEntity?.removeFromParent()
         self.sceneManager.drawAnchorEntity = nil
         self.sceneManager.drawingBeadPrototypeCache.removeAll(keepingCapacity: true)
+        for artifactId in drawingArtifactIds {
+            self.sceneManager.artifactOwnerBadgeViews[artifactId]?.removeFromSuperview()
+            self.sceneManager.artifactOwnerBadgeViews[artifactId] = nil
+            self.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = nil
+            self.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = nil
+        }
     }
 
     func restoreDrawingsFromCloud(sceneId: String, in arView: ARView) {
@@ -250,6 +267,15 @@ extension ARViewContainer {
                             beads: beads,
                             points: pointsToRender
                         )
+                        if let first = pointsToRender.first {
+                            self.upsertArtifactOwnerBadge(
+                                artifactId: stroke.artifactId,
+                                ownerUid: stroke.ownerUid,
+                                worldPosition: first,
+                                yOffset: -28,
+                                on: arView
+                            )
+                        }
                     }
                 }
             } catch {
@@ -305,8 +331,9 @@ extension ARViewContainer.Coordinator {
             currentFingerPosition = gesture.location(in: arView)
 
         case .ended, .cancelled:
-            if let stroke = parent.sceneManager.drawingManager.endStroke() {
-                parent.saveDrawingStrokeToFirestore(stroke)
+            if let stroke = parent.sceneManager.drawingManager.endStroke(),
+               let arView = arView {
+                parent.saveDrawingStrokeToFirestore(stroke, on: arView)
             }
             currentFingerPosition = nil
 
@@ -354,7 +381,13 @@ extension ARViewContainer.Coordinator {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.parent.sceneManager.drawingManager.undoLastStroke(in: arView.scene)
+            guard let self = self else { return }
+            if let artifactId = self.parent.sceneManager.drawingManager.undoLastStroke(in: arView.scene) {
+                self.parent.sceneManager.artifactOwnerBadgeViews[artifactId]?.removeFromSuperview()
+                self.parent.sceneManager.artifactOwnerBadgeViews[artifactId] = nil
+                self.parent.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = nil
+                self.parent.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = nil
+            }
         }
         let clear = NotificationCenter.default.addObserver(
             forName: .clearAllDrawingStrokes,

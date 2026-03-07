@@ -100,11 +100,12 @@ class DrawingManager: ObservableObject {
 
     // MARK: Undo / Clear
 
-    func undoLastStroke(in scene: RealityKit.Scene) {
-        guard let last = strokeGroups.popLast() else { return }
+    func undoLastStroke(in scene: RealityKit.Scene) -> String? {
+        guard let last = strokeGroups.popLast() else { return nil }
         last.beads.forEach { $0.removeFromParent() }
         totalBeadCount = max(0, totalBeadCount - last.beads.count)
         objectWillChange.send()
+        return last.artifactId
     }
 
     func clearAll(in scene: RealityKit.Scene) {

@@ -7,6 +7,7 @@ import RealityKit
 import ARKit
 import UIKit
 import Foundation
+import FirebaseAuth
 
 extension ARViewContainer {
 
@@ -68,14 +69,32 @@ extension ARViewContainer {
         }
     }
 
-    private func saveAnnotationToFirestore(annotationId: UUID, text: String, transform: simd_float4x4) {
-        let sceneId = currentSceneIdForArtifacts()
+    private func saveAnnotationToFirestore(
+        annotationId: UUID,
+        text: String,
+        transform: simd_float4x4,
+        on arView: ARView
+    ) {
         let artifactId = annotationId.uuidString
 
         let coordinate = LocationService.shared.currentCoordinate
 
         Task {
             do {
+                let sceneId = try await writableSceneIdForArtifactWrites()
+                let ownerUid = Auth.auth().currentUser?.uid ?? ""
+                let pos = SIMD3<Float>(
+                    transform.columns.3.x,
+                    transform.columns.3.y,
+                    transform.columns.3.z
+                )
+                self.upsertArtifactOwnerBadge(
+                    artifactId: artifactId,
+                    ownerUid: ownerUid,
+                    worldPosition: pos,
+                    yOffset: -84,
+                    on: arView
+                )
                 try await ArtifactsService.shared.createAnnotationArtifact(
                     artifactId: artifactId,
                     annotationText: text,
@@ -172,6 +191,115 @@ extension ARViewContainer {
                 self.sceneManager.deleteButtons[id]?.isHidden = true
             }
         }
+
+        self.layoutArtifactOwnerBadges(on: arView)
+    }
+
+    func upsertArtifactOwnerBadge(
+        artifactId: String,
+        ownerUid: String,
+        worldPosition: SIMD3<Float>,
+        yOffset: CGFloat = -36,
+        on arView: ARView
+    ) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async {
+                self.upsertArtifactOwnerBadge(
+                    artifactId: artifactId,
+                    ownerUid: ownerUid,
+                    worldPosition: worldPosition,
+                    yOffset: yOffset,
+                    on: arView
+                )
+            }
+            return
+        }
+
+        let label: UILabel
+        if let existing = self.sceneManager.artifactOwnerBadgeViews[artifactId] {
+            label = existing
+        } else {
+            let created = UILabel(frame: .zero)
+            created.font = .systemFont(ofSize: 10, weight: .bold)
+            created.textColor = .white
+            created.backgroundColor = UIColor.black.withAlphaComponent(0.65)
+            created.layer.cornerRadius = 8
+            created.layer.masksToBounds = true
+            created.textAlignment = .center
+            created.clipsToBounds = true
+            created.isUserInteractionEnabled = false
+            created.alpha = 0.9
+            arView.addSubview(created)
+            self.sceneManager.artifactOwnerBadgeViews[artifactId] = created
+            label = created
+        }
+
+        let defaultText = self.sceneManager.artifactOwnerUsernames[ownerUid].map { "@\($0)" } ?? "@unknown"
+        label.text = defaultText
+        label.sizeToFit()
+        label.bounds = CGRect(
+            x: 0,
+            y: 0,
+            width: max(44, label.bounds.width + 10),
+            height: 18
+        )
+
+        self.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = worldPosition
+        self.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = yOffset
+        resolveOwnerUsernameIfNeeded(ownerUid: ownerUid, for: label)
+    }
+
+    private func layoutArtifactOwnerBadges(on arView: ARView) {
+        guard let frame = arView.session.currentFrame else { return }
+        let worldToCamera = simd_inverse(frame.camera.transform)
+
+        for (artifactId, label) in self.sceneManager.artifactOwnerBadgeViews {
+            guard let worldPos = self.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] else {
+                label.isHidden = true
+                continue
+            }
+
+            if let p = arView.project(worldPos) {
+                let cameraSpace = simd_mul(worldToCamera, SIMD4<Float>(worldPos.x, worldPos.y, worldPos.z, 1))
+                let isInFrontOfCamera = cameraSpace.z < 0
+                label.isHidden = !isInFrontOfCamera
+                if isInFrontOfCamera {
+                    let yOffset = self.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] ?? -36
+                    label.center = CGPoint(
+                        x: CGFloat(p.x),
+                        y: CGFloat(p.y) + yOffset
+                    )
+                    arView.bringSubviewToFront(label)
+                }
+            } else {
+                label.isHidden = true
+            }
+        }
+    }
+
+    private func resolveOwnerUsernameIfNeeded(ownerUid: String, for label: UILabel) {
+        guard !ownerUid.isEmpty else { return }
+        if let cached = self.sceneManager.artifactOwnerUsernames[ownerUid] {
+            label.text = "@\(cached)"
+            label.sizeToFit()
+            label.bounds.size.width = max(44, label.bounds.width + 10)
+            return
+        }
+        guard !self.sceneManager.artifactOwnerUsernameLookupsInFlight.contains(ownerUid) else { return }
+        self.sceneManager.artifactOwnerUsernameLookupsInFlight.insert(ownerUid)
+
+        Task {
+            let username = try? await ArtifactsService.shared.fetchUsername(for: ownerUid)
+            await MainActor.run {
+                self.sceneManager.artifactOwnerUsernameLookupsInFlight.remove(ownerUid)
+                if let username = username, !username.isEmpty {
+                    self.sceneManager.artifactOwnerUsernames[ownerUid] = username
+                    label.text = "@\(username)"
+                    label.sizeToFit()
+                    label.bounds.size.width = max(44, label.bounds.width + 10)
+                }
+            }
+        }
     }
 
     private func shouldShowDeleteButton(for id: UUID) -> Bool {
@@ -204,12 +332,25 @@ extension ARViewContainer {
         let name = annotationNamePrefix + encodeAnnotation(payload)
         let anchor = ARAnchor(name: name, transform: transform)
         arView.session.add(anchor: anchor)
+        let ownerUid = Auth.auth().currentUser?.uid ?? ""
+        let pos = SIMD3<Float>(
+            transform.columns.3.x,
+            transform.columns.3.y,
+            transform.columns.3.z
+        )
+        self.upsertArtifactOwnerBadge(
+            artifactId: id.uuidString,
+            ownerUid: ownerUid,
+            worldPosition: pos,
+            yOffset: -84,
+            on: arView
+        )
         attachAnnotationView(for: anchor, data: payload, on: arView)
         self.sceneManager.hasBeenTapped[id] = false
         self.sceneManager.pendingAnnotationText = nil
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        saveAnnotationToFirestore(annotationId: id, text: trimmed, transform: transform)
+        saveAnnotationToFirestore(annotationId: id, text: trimmed, transform: transform, on: arView)
     }
 
     func placeAnnotation(at point: CGPoint, on arView: ARView) {
@@ -226,13 +367,26 @@ extension ARViewContainer {
         let name = annotationNamePrefix + encodeAnnotation(payload)
         let anchor = ARAnchor(name: name, transform: transform)
         arView.session.add(anchor: anchor)
+        let ownerUid = Auth.auth().currentUser?.uid ?? ""
+        let pos = SIMD3<Float>(
+            transform.columns.3.x,
+            transform.columns.3.y,
+            transform.columns.3.z
+        )
+        self.upsertArtifactOwnerBadge(
+            artifactId: id.uuidString,
+            ownerUid: ownerUid,
+            worldPosition: pos,
+            yOffset: -84,
+            on: arView
+        )
         attachAnnotationView(for: anchor, data: payload, on: arView)
         self.sceneManager.hasBeenTapped[id] = (rawText != "Tap to Edit")
         self.sceneManager.pendingAnnotationText = nil
         self.placementSettings.selectedTool = .none
 
         let trimmed = payload.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        saveAnnotationToFirestore(annotationId: id, text: trimmed, transform: transform)
+        saveAnnotationToFirestore(annotationId: id, text: trimmed, transform: transform, on: arView)
     }
 
     func showDeleteButton(for id: UUID, on arView: ARView) {

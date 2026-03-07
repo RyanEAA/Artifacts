@@ -217,6 +217,12 @@ struct SceneButtons: View {
             sceneManager.annotationViews.removeAll()
             sceneManager.isEditing.removeAll()
             sceneManager.hasBeenTapped.removeAll()
+            for (_, badge) in sceneManager.artifactOwnerBadgeViews {
+                badge.removeFromSuperview()
+            }
+            sceneManager.artifactOwnerBadgeViews.removeAll()
+            sceneManager.artifactOwnerBadgeWorldPositions.removeAll()
+            sceneManager.artifactOwnerBadgeOffsetsY.removeAll()
 
             NotificationCenter.default.post(name: .clearAllAnnotations, object: nil)
             NotificationCenter.default.post(name: .clearAllDrawingStrokes, object: nil)

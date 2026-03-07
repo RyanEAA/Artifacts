@@ -6,6 +6,7 @@
 import RealityKit
 import ARKit
 import Foundation
+import FirebaseAuth
 
 extension ARViewContainer {
 
@@ -171,12 +172,17 @@ extension ARViewContainer {
         self.sceneManager.shouldLoadSceneFromCloud = false
         self.sceneManager.beginPersistenceProgress("Loading scene...")
         self.sceneManager.stopAnnotationTextListener()
+        self.sceneManager.selectedSceneOwnerUid = nil
         self.sceneManager.anchorEntities.removeAll(keepingCapacity: true)
         self.clearAllDrawings(in: arView)
         self.sceneManager.fallbackArtifactAnchorEntity?.removeFromParent()
         self.sceneManager.fallbackArtifactAnchorEntity = nil
         self.sceneManager.fallbackRestoredModelArtifactIds.removeAll(keepingCapacity: true)
         self.sceneManager.fallbackRestoredAnnotationArtifactIds.removeAll(keepingCapacity: true)
+        for (_, badge) in self.sceneManager.artifactOwnerBadgeViews { badge.removeFromSuperview() }
+        self.sceneManager.artifactOwnerBadgeViews.removeAll(keepingCapacity: true)
+        self.sceneManager.artifactOwnerBadgeWorldPositions.removeAll(keepingCapacity: true)
+        self.sceneManager.artifactOwnerBadgeOffsetsY.removeAll(keepingCapacity: true)
 
         for (_, view) in self.sceneManager.annotationViews { view.removeFromSuperview() }
         for (_, btn) in self.sceneManager.deleteButtons { btn.removeFromSuperview() }
@@ -193,6 +199,12 @@ extension ARViewContainer {
         let targetSceneId: String? = self.sceneManager.selectedCloudSceneId
 
         if let id = targetSceneId {
+            Task {
+                let ownerUid = try? await ArtifactsService.shared.fetchSceneOwnerUid(sceneId: id)
+                await MainActor.run {
+                    self.sceneManager.selectedSceneOwnerUid = ownerUid ?? Auth.auth().currentUser?.uid
+                }
+            }
             startRealtimeAnnotationSyncIfNeeded(on: arView)
             Task {
                 do {
@@ -244,6 +256,12 @@ extension ARViewContainer {
                 self.preloadModelEntities(named: modelNames)
                 self.sceneManager.selectedCloudSceneId = sceneId
                 self.sceneManager.selectedCloudSceneStoragePath = storagePath
+                Task {
+                    let ownerUid = try? await ArtifactsService.shared.fetchSceneOwnerUid(sceneId: sceneId)
+                    await MainActor.run {
+                        self.sceneManager.selectedSceneOwnerUid = ownerUid ?? Auth.auth().currentUser?.uid
+                    }
+                }
                 self.startRealtimeAnnotationSyncIfNeeded(on: arView)
 
                 Task {
@@ -317,6 +335,23 @@ extension ARViewContainer {
             entity.transform.matrix = record.transform
             root.addChild(entity)
             self.sceneManager.fallbackRestoredModelArtifactIds.insert(record.artifactId)
+            let pos = SIMD3<Float>(
+                record.transform.columns.3.x,
+                record.transform.columns.3.y,
+                record.transform.columns.3.z
+            )
+            let hasAnchorBackedModelBadge = self.sceneManager.artifactOwnerBadgeViews.keys.contains {
+                $0.hasPrefix("model-anchor-")
+            }
+            if !hasAnchorBackedModelBadge {
+                self.upsertArtifactOwnerBadge(
+                    artifactId: record.artifactId,
+                    ownerUid: record.ownerUid,
+                    worldPosition: pos,
+                    yOffset: -40,
+                    on: arView
+                )
+            }
             self.sceneManager.markRestoredModelIfAwaiting()
         }
 
@@ -355,6 +390,18 @@ extension ARViewContainer {
                         let name = annotationNamePrefix + self.encodeAnnotation(payload)
                         let anchor = ARAnchor(name: name, transform: record.transform)
                         self.attachAnnotationView(for: anchor, data: payload, on: arView)
+                        let pos = SIMD3<Float>(
+                            record.transform.columns.3.x,
+                            record.transform.columns.3.y,
+                            record.transform.columns.3.z
+                        )
+                        self.upsertArtifactOwnerBadge(
+                            artifactId: record.artifactId,
+                            ownerUid: record.ownerUid,
+                            worldPosition: pos,
+                            yOffset: -84,
+                            on: arView
+                        )
                         self.sceneManager.fallbackRestoredAnnotationArtifactIds.insert(record.artifactId)
                     }
                 }

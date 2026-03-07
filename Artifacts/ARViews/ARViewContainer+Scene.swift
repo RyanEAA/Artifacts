@@ -6,8 +6,30 @@
 import RealityKit
 import ARKit
 import UIKit
+import FirebaseAuth
 
 extension ARViewContainer {
+
+    func writableSceneIdForArtifactWrites() async throws -> String {
+        let preferred = self.sceneManager.selectedCloudSceneId
+
+        let resolution = try await withCheckedThrowingContinuation { continuation in
+            CloudSceneStore.resolveWritableSceneId(preferredSceneId: preferred) { result in
+                continuation.resume(with: result)
+            }
+        }
+
+        self.sceneManager.selectedCloudSceneId = resolution.sceneId
+        self.sceneManager.selectedCloudSceneStoragePath = nil
+
+        try await withCheckedThrowingContinuation { continuation in
+            CloudSceneStore.ensureSceneDocumentExists(sceneId: resolution.sceneId) { result in
+                continuation.resume(with: result)
+            }
+        }
+
+        return resolution.sceneId
+    }
 
     func currentSceneIdForArtifacts() -> String {
         if let id = self.sceneManager.selectedCloudSceneId, !id.isEmpty {
@@ -19,16 +41,18 @@ extension ARViewContainer {
         return newId
     }
 
-    private func saveModelToFirestore(modelName: String, transform: simd_float4x4) {
-        let sceneId = currentSceneIdForArtifacts()
-        let artifactId = UUID().uuidString
-
+    private func saveModelToFirestore(
+        artifactId: String,
+        modelName: String,
+        transform: simd_float4x4,
+        in arView: ARView
+    ) {
         let coordinate = LocationService.shared.currentCoordinate
-
-        print("🟩 Saving model artifact modelName:", modelName, "sceneId:", sceneId, "artifactId:", artifactId)
 
         Task {
             do {
+                let sceneId = try await writableSceneIdForArtifactWrites()
+                print("🟩 Saving model artifact modelName:", modelName, "sceneId:", sceneId, "artifactId:", artifactId)
                 try await ArtifactsService.shared.createModelArtifact(
                     artifactId: artifactId,
                     modelName: modelName,
@@ -63,7 +87,26 @@ extension ARViewContainer {
                 self.place(modelEntity, for: anchor, in: arView)
                 arView.session.add(anchor: anchor)
                 self.placementSettings.recentlyPlaced.append(modelAnchor.model)
-                saveModelToFirestore(modelName: modelAnchor.model.name, transform: transform)
+                let artifactId = UUID().uuidString
+                let ownerUid = Auth.auth().currentUser?.uid ?? ""
+                let pos = SIMD3<Float>(
+                    transform.columns.3.x,
+                    transform.columns.3.y,
+                    transform.columns.3.z
+                )
+                self.upsertArtifactOwnerBadge(
+                    artifactId: artifactId,
+                    ownerUid: ownerUid,
+                    worldPosition: pos,
+                    yOffset: -40,
+                    on: arView
+                )
+                saveModelToFirestore(
+                    artifactId: artifactId,
+                    modelName: modelAnchor.model.name,
+                    transform: transform,
+                    in: arView
+                )
             }
         }
 

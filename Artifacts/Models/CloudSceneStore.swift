@@ -87,7 +87,10 @@ final class CloudSceneStore {
 
         db.collection("scenes").document(preferred).getDocument { doc, err in
             if let err = err {
-                completion(.failure(err))
+                // If we cannot read the preferred scene (permission, missing auth state, etc.),
+                // fork to a fresh scene id so local writes can proceed.
+                print("⚠️ resolveWritableSceneId read failed, forking scene id:", err.localizedDescription)
+                completion(.success((sceneId: UUID().uuidString, remappedFromSceneId: preferred)))
                 return
             }
 
@@ -103,6 +106,31 @@ final class CloudSceneStore {
             } else {
                 // Friend-owned scene: fork to a new scene id for writable metadata.
                 completion(.success((sceneId: UUID().uuidString, remappedFromSceneId: preferred)))
+            }
+        }
+    }
+
+    static func ensureSceneDocumentExists(
+        sceneId: String,
+        name: String = "My Scene",
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            completion(.failure(CloudSceneError.noUser))
+            return
+        }
+
+        let doc: [String: Any] = [
+            "ownerUid": uid,
+            "name": name,
+            "updatedAt": Timestamp(date: Date())
+        ]
+
+        db.collection("scenes").document(sceneId).setData(doc, merge: true) { error in
+            if let error {
+                completion(.failure(error))
+            } else {
+                completion(.success(()))
             }
         }
     }
