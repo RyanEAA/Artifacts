@@ -25,6 +25,8 @@ extension ARViewContainer {
         /// Tracks the current finger screen position while drawing.
         /// Set by handleDrawPan; consumed by tickDrawing on every AR frame.
         var currentFingerPosition: CGPoint? = nil
+        /// Prevents queueing unbounded draw ticks on the main thread.
+        var isDrawingTickScheduled: Bool = false
 
         /// Notification observers retained for the lifetime of the coordinator.
         var notificationObservers: [NSObjectProtocol] = []
@@ -97,8 +99,11 @@ extension ARViewContainer {
         func session(_ session: ARSession, didUpdate frame: ARFrame) {
             guard case .draw = parent.placementSettings.selectedTool else { return }
             guard currentFingerPosition != nil else { return }
+            guard !isDrawingTickScheduled else { return }
+            isDrawingTickScheduled = true
             DispatchQueue.main.async {
                 self.tickDrawing()
+                self.isDrawingTickScheduled = false
             }
         }
 

@@ -28,7 +28,7 @@ extension ARViewContainer {
 
         self.sceneManager.stopAnnotationTextListener()
         self.sceneManager.annotationTextListenerSceneId = sceneId
-        self.sceneManager.annotationTextListener = ArtifactsService.shared.listenMyAnnotationTextOverrides(
+        self.sceneManager.annotationTextListener = ArtifactsService.shared.listenVisibleAnnotationTextOverrides(
             sceneId: sceneId
         ) { overrides in
             DispatchQueue.main.async {

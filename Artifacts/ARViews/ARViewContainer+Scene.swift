@@ -15,6 +15,7 @@ extension ARViewContainer {
         }
         let newId = UUID().uuidString
         self.sceneManager.selectedCloudSceneId = newId
+        self.sceneManager.selectedCloudSceneStoragePath = nil
         return newId
     }
 

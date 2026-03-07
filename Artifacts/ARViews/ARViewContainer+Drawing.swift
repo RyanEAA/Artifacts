@@ -208,7 +208,7 @@ extension ARViewContainer {
         guard !sceneId.isEmpty else { return }
         Task {
             do {
-                let strokes = try await ArtifactsService.shared.fetchMyDrawingArtifacts(sceneId: sceneId)
+                let strokes = try await ArtifactsService.shared.fetchVisibleDrawingArtifacts(sceneId: sceneId)
                 await MainActor.run {
                     var remainingPointBudget = 1800
                     for stroke in strokes {
@@ -253,7 +253,7 @@ extension ARViewContainer {
                     }
                 }
             } catch {
-                print("⚠️ fetchMyDrawingArtifacts error:", error.localizedDescription)
+                print("⚠️ fetchVisibleDrawingArtifacts error:", error.localizedDescription)
             }
         }
     }
@@ -263,12 +263,20 @@ extension ARViewContainer {
         let started = Date()
 
         func attempt() {
-            if self.sceneManager.isAwaitingVisibleArtifactsAfterLoad,
-               Date().timeIntervalSince(started) < maxWaitSeconds {
+            let elapsed = Date().timeIntervalSince(started)
+            let timedOut = elapsed >= maxWaitSeconds
+
+            if self.sceneManager.isAwaitingVisibleArtifactsAfterLoad, !timedOut {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     attempt()
                 }
                 return
+            }
+
+            if self.sceneManager.isAwaitingVisibleArtifactsAfterLoad && timedOut {
+                // Fallback: when world-map relocalization doesn't re-add anchors in time,
+                // restore models/annotations directly from artifact transforms.
+                self.restoreVisibleModelsAndAnnotationsFromCloud(sceneId: sceneId, in: arView)
             }
             self.restoreDrawingsFromCloud(sceneId: sceneId, in: arView)
         }

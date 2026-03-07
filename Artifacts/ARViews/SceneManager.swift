@@ -25,6 +25,7 @@ class SceneManager: ObservableObject {
     var shouldSaveSceneToCloud: Bool = false
     var shouldLoadSceneFromCloud: Bool = false
     var selectedCloudSceneId: String?
+    var selectedCloudSceneStoragePath: String?
 
     lazy var persistenceUrl: URL = {
         do {
@@ -61,6 +62,9 @@ class SceneManager: ObservableObject {
     /// Created lazily on the first bead placed.
     var drawAnchorEntity: AnchorEntity? = nil
     var drawingBeadPrototypeCache: [String: ModelEntity] = [:]
+    var fallbackArtifactAnchorEntity: AnchorEntity? = nil
+    var fallbackRestoredModelArtifactIds: Set<String> = []
+    var fallbackRestoredAnnotationArtifactIds: Set<String> = []
 
     // Firestore override cache for the currently loading scene.
     // Key is artifactId (UUID string), value is annotationText.

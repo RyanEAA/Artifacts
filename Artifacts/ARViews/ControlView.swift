@@ -80,31 +80,77 @@ struct SceneButtons: View {
             print("Load Scene Button Pressed")
             sceneManager.beginPersistenceProgress("Finding latest scene...")
 
-            CloudSceneStore.fetchMostRecentSceneMeta { result in
-                switch result {
-                case .success(let meta):
-                    if let meta {
+            CloudSceneStore.fetchMostRecentAccessibleSceneMeta { accessibleResult in
+                switch accessibleResult {
+                case .success(let accessibleMeta):
+                    if let meta = accessibleMeta {
                         DispatchQueue.main.async {
                             self.sceneManager.selectedCloudSceneId = meta.id
+                            self.sceneManager.selectedCloudSceneStoragePath = meta.storagePath
                             print("Attemping to load scene with id: \(meta.id)")
                             self.sceneManager.updatePersistenceProgress("Loading scene...")
                             self.sceneManager.shouldLoadSceneFromCloud = true
                         }
-                    } else {
-                        print("No cloud scene found to load.")
-                        self.sceneManager.endPersistenceProgress()
-                        self.sceneManager.postPersistenceNotice(
-                            "No saved scene found to load.",
-                            style: .info
-                        )
+                        return
+                    }
+
+                    CloudSceneStore.fetchMostRecentSceneMeta { ownResult in
+                        switch ownResult {
+                        case .success(let ownMeta):
+                            if let meta = ownMeta {
+                                DispatchQueue.main.async {
+                                    self.sceneManager.selectedCloudSceneId = meta.id
+                                    self.sceneManager.selectedCloudSceneStoragePath = meta.storagePath
+                                    print("Attemping to load scene with id: \(meta.id)")
+                                    self.sceneManager.updatePersistenceProgress("Loading scene...")
+                                    self.sceneManager.shouldLoadSceneFromCloud = true
+                                }
+                            } else {
+                                print("No cloud scene found to load.")
+                                self.sceneManager.endPersistenceProgress()
+                                self.sceneManager.postPersistenceNotice(
+                                    "No saved scene found to load.",
+                                    style: .info
+                                )
+                            }
+                        case .failure(let e):
+                            print("Failed to fetch own latest scene meta on tap:", e)
+                            self.sceneManager.endPersistenceProgress()
+                            self.sceneManager.postPersistenceNotice(
+                                "Failed to find a scene to load.",
+                                style: .error
+                            )
+                        }
                     }
                 case .failure(let e):
-                    print("Failed to fetch latest scene meta on tap:", e)
-                    self.sceneManager.endPersistenceProgress()
-                    self.sceneManager.postPersistenceNotice(
-                        "Failed to find a scene to load.",
-                        style: .error
-                    )
+                    print("Failed to fetch accessible latest scene meta on tap:", e)
+                    CloudSceneStore.fetchMostRecentSceneMeta { ownResult in
+                        switch ownResult {
+                        case .success(let ownMeta):
+                            if let meta = ownMeta {
+                                DispatchQueue.main.async {
+                                    self.sceneManager.selectedCloudSceneId = meta.id
+                                    self.sceneManager.selectedCloudSceneStoragePath = meta.storagePath
+                                    print("Attemping to load scene with id: \(meta.id)")
+                                    self.sceneManager.updatePersistenceProgress("Loading scene...")
+                                    self.sceneManager.shouldLoadSceneFromCloud = true
+                                }
+                            } else {
+                                self.sceneManager.endPersistenceProgress()
+                                self.sceneManager.postPersistenceNotice(
+                                    "No saved scene found to load.",
+                                    style: .info
+                                )
+                            }
+                        case .failure(let ownError):
+                            print("Failed to fetch own latest scene meta on tap fallback:", ownError)
+                            self.sceneManager.endPersistenceProgress()
+                            self.sceneManager.postPersistenceNotice(
+                                "Failed to find a scene to load.",
+                                style: .error
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -112,16 +158,44 @@ struct SceneButtons: View {
         .disabled(sceneManager.isPersistenceInProgress)
 
         .onAppear {
-            CloudSceneStore.fetchMostRecentSceneMeta { result in
-                switch result {
-                case .success(let meta):
-                    if let meta {
+            CloudSceneStore.fetchMostRecentAccessibleSceneMeta { accessibleResult in
+                switch accessibleResult {
+                case .success(let accessibleMeta):
+                    if let meta = accessibleMeta {
                         DispatchQueue.main.async {
                             self.sceneManager.selectedCloudSceneId = meta.id
+                            self.sceneManager.selectedCloudSceneStoragePath = meta.storagePath
+                        }
+                        return
+                    }
+                    CloudSceneStore.fetchMostRecentSceneMeta { ownResult in
+                        switch ownResult {
+                        case .success(let ownMeta):
+                            if let meta = ownMeta {
+                                DispatchQueue.main.async {
+                                    self.sceneManager.selectedCloudSceneId = meta.id
+                                    self.sceneManager.selectedCloudSceneStoragePath = meta.storagePath
+                                }
+                            }
+                        case .failure(let e):
+                            print("Failed to fetch own latest scene meta on appear:", e)
                         }
                     }
                 case .failure(let e):
-                    print("Failed to fetch latest scene meta on appear:", e)
+                    print("Failed to fetch accessible latest scene meta on appear:", e)
+                    CloudSceneStore.fetchMostRecentSceneMeta { ownResult in
+                        switch ownResult {
+                        case .success(let ownMeta):
+                            if let meta = ownMeta {
+                                DispatchQueue.main.async {
+                                    self.sceneManager.selectedCloudSceneId = meta.id
+                                    self.sceneManager.selectedCloudSceneStoragePath = meta.storagePath
+                                }
+                            }
+                        case .failure(let ownError):
+                            print("Failed to fetch own latest scene meta on appear fallback:", ownError)
+                        }
+                    }
                 }
             }
         }

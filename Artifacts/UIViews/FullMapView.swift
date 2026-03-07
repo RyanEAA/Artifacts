@@ -14,42 +14,39 @@ struct FullMapView: View {
 
     @State var region: MKCoordinateRegion
     let artifacts: [ArtifactMapItem]
+    let ownerAvatarURLs: [String: String]
     var onDismiss: (MKCoordinateRegion) -> Void
 
-    @State private var selected: ArtifactMapItem?
+    @State private var selectedClusterID: String?
+    @State private var selectedArtifact: ArtifactMapItem?
+
+    private var clusters: [ArtifactCluster] {
+        ArtifactMapClusterer.makeClusters(items: artifacts)
+    }
 
     var body: some View {
         ZStack {
-            Map(coordinateRegion: $region, annotationItems: artifacts) { item in
-                MapAnnotation(coordinate: offsetCoordinate(for: item)) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.black.opacity(0.78))
-                            .frame(width: selected?.id == item.id ? 40 : 32, height: selected?.id == item.id ? 40 : 32)
-                            .overlay(
-                                Circle()
-                                    .stroke(Color("MintGreen").opacity(selected?.id == item.id ? 0.85 : 0.55), lineWidth: selected?.id == item.id ? 2 : 1)
-                            )
-
-                        Image(systemName: "sparkles")
-                            .font(.system(size: selected?.id == item.id ? 15 : 13, weight: .bold))
-                            .foregroundColor(Color("MintGreen").opacity(0.92))
-                    }
-//                    .shadow(color: Color.black.opacity(0.45), radius: 8, x: 0, y: 6)
-                    .animation(.easeInOut(duration: 0.18), value: selected?.id == item.id)
+            Map(coordinateRegion: $region, annotationItems: clusters) { cluster in
+                MapAnnotation(coordinate: cluster.coordinate) {
+                    ArtifactMarkerView(
+                        owners: markerOwners(for: cluster),
+                        isSelected: selectedClusterID == cluster.id
+                    )
                     .onTapGesture {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        selected = item
-                        withAnimation(.easeInOut(duration: 0.35)) {
-                            region.center = item.coordinate
+                        DispatchQueue.main.async {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            selectedClusterID = cluster.id
+                            handleClusterTap(cluster)
                         }
-                        openAppleMapsForArtifact(item)
                     }
                     .onLongPressGesture {
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        selected = item
-                        withAnimation(.easeInOut(duration: 0.35)) {
-                            region.center = item.coordinate
+                        DispatchQueue.main.async {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            selectedClusterID = cluster.id
+                            selectedArtifact = cluster.items.first
+                            withAnimation(.easeInOut(duration: 0.35)) {
+                                region.center = cluster.coordinate
+                            }
                         }
                     }
                 }
@@ -93,14 +90,14 @@ struct FullMapView: View {
 
                 Spacer()
 
-                if let selected {
+                if let selectedArtifact {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(selected.title)
+                        Text(selectedArtifact.title)
                             .font(.custom("Poppins-Bold", size: 16))
                             .foregroundColor(Color.white.opacity(0.92))
                             .lineLimit(1)
 
-                        Text("Lat \(String(format: "%.5f", selected.coordinate.latitude))  Lon \(String(format: "%.5f", selected.coordinate.longitude))")
+                        Text("Lat \(String(format: "%.5f", selectedArtifact.coordinate.latitude))  Lon \(String(format: "%.5f", selectedArtifact.coordinate.longitude))")
                             .font(.custom("Poppins-Regular", size: 12))
                             .foregroundColor(Color.white.opacity(0.70))
                             .lineLimit(1)
@@ -136,33 +133,30 @@ struct FullMapView: View {
             MKLaunchOptionsShowsTrafficKey: true
         ]
 
-        MKMapItem.openMaps(with: [mapItem], launchOptions: launchOptions)
-    }
-    
-    private func duplicates(for item: ArtifactMapItem) -> [ArtifactMapItem] {
-        artifacts.filter {
-            $0.coordinate.latitude == item.coordinate.latitude &&
-            $0.coordinate.longitude == item.coordinate.longitude
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            MKMapItem.openMaps(with: [mapItem], launchOptions: launchOptions)
         }
     }
 
-    private func offsetCoordinate(for item: ArtifactMapItem) -> CLLocationCoordinate2D {
-        let group = duplicates(for: item)
-
-        guard group.count > 1,
-              let index = group.firstIndex(where: { $0.id == item.id })
-        else {
-            return item.coordinate
+    private func handleClusterTap(_ cluster: ArtifactCluster) {
+        withAnimation(.easeInOut(duration: 0.35)) {
+            region.center = cluster.coordinate
         }
 
-        let radius: Double = 0.00008
-        let angleStep = (2 * Double.pi) / Double(group.count)
-        let angle = angleStep * Double(index)
+        if let item = cluster.items.first {
+            selectedArtifact = item
+            openAppleMapsForArtifact(item)
+        }
+    }
 
-        return CLLocationCoordinate2D(
-            latitude: item.coordinate.latitude + radius * cos(angle),
-            longitude: item.coordinate.longitude + radius * sin(angle)
-        )
+    private func markerOwners(for cluster: ArtifactCluster) -> [ArtifactMarkerOwner] {
+        cluster.ownerArtifactCounts.map { bucket in
+            ArtifactMarkerOwner(
+                ownerUid: bucket.ownerUid,
+                imageURL: ownerAvatarURLs[bucket.ownerUid],
+                count: bucket.count
+            )
+        }
     }
 }
 
@@ -173,6 +167,7 @@ struct FullMapView: View {
             span: MKCoordinateSpan(latitudeDelta: 0.03, longitudeDelta: 0.03)
         ),
         artifacts: [],
+        ownerAvatarURLs: [:],
         onDismiss: { _ in }
     )
 }
