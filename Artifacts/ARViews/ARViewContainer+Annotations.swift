@@ -234,8 +234,16 @@ extension ARViewContainer {
             label = created
         }
 
-        let defaultText = self.sceneManager.artifactOwnerUsernames[ownerUid].map { "@\($0)" } ?? "@unknown"
-        label.text = defaultText
+        self.sceneManager.artifactOwnerBadgeOwnerUids[artifactId] = ownerUid
+
+        if let username = self.sceneManager.artifactOwnerUsernames[ownerUid], !username.isEmpty {
+            label.text = "@\(username)"
+            label.isHidden = false
+        } else {
+            // Avoid flashing "@unknown"; show once username resolves.
+            label.text = nil
+            label.isHidden = true
+        }
         label.sizeToFit()
         label.bounds = CGRect(
             x: 0,
@@ -259,10 +267,15 @@ extension ARViewContainer {
                 continue
             }
 
+            if let ownerUid = self.sceneManager.artifactOwnerBadgeOwnerUids[artifactId],
+               (label.text == nil || label.text?.isEmpty == true) {
+                resolveOwnerUsernameIfNeeded(ownerUid: ownerUid, for: label)
+            }
+
             if let p = arView.project(worldPos) {
                 let cameraSpace = simd_mul(worldToCamera, SIMD4<Float>(worldPos.x, worldPos.y, worldPos.z, 1))
                 let isInFrontOfCamera = cameraSpace.z < 0
-                label.isHidden = !isInFrontOfCamera
+                label.isHidden = !isInFrontOfCamera || label.text == nil
                 if isInFrontOfCamera {
                     let yOffset = self.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] ?? -36
                     label.center = CGPoint(
@@ -297,6 +310,7 @@ extension ARViewContainer {
                     label.text = "@\(username)"
                     label.sizeToFit()
                     label.bounds.size.width = max(44, label.bounds.width + 10)
+                    label.isHidden = false
                 }
             }
         }

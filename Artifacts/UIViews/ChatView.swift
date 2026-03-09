@@ -235,10 +235,15 @@ struct ChatView: View {
         inputText = ""
 
         Task {
-            if threadId.isEmpty {
+            let needsSetup = await MainActor.run { self.threadId.isEmpty || self.listener == nil }
+            if needsSetup {
                 await MainActor.run { self.threadId = tId }
                 await ensureThreadExists(threadId: tId)
-                await MainActor.run { self.attachListener(threadId: tId) }
+                await MainActor.run {
+                    if self.listener == nil {
+                        self.attachListener(threadId: tId)
+                    }
+                }
             }
 
             do {

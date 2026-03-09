@@ -51,6 +51,7 @@ class SceneManager: ObservableObject {
     @Published var artifactOwnerBadgeViews: [String: UILabel] = [:]
     var artifactOwnerBadgeWorldPositions: [String: SIMD3<Float>] = [:]
     var artifactOwnerBadgeOffsetsY: [String: CGFloat] = [:]
+    var artifactOwnerBadgeOwnerUids: [String: String] = [:]
     var artifactOwnerUsernames: [String: String] = [:]
     var artifactOwnerUsernameLookupsInFlight: Set<String> = []
 

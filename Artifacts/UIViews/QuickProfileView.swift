@@ -91,7 +91,6 @@ struct QuickProfileView: View {
         }
         .sheet(isPresented: $showFriends) {
             FriendsListSheet(friends: $friends)
-                .presentationDetents([.medium, .large])
         }
         .fullScreenCover(isPresented: $showFullMap) {
             FullMapView(region: region, artifacts: artifacts, ownerAvatarURLs: ownerAvatarURLs) { newRegion in

@@ -171,6 +171,7 @@ extension ARViewContainer {
             parent.sceneManager.artifactOwnerBadgeViews[artifactId] = nil
             parent.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = nil
             parent.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = nil
+            parent.sceneManager.artifactOwnerBadgeOwnerUids[artifactId] = nil
         }
 
         // MARK: - Tap Gesture (Annotation Placement & Editing)

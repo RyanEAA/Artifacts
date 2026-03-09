@@ -210,6 +210,19 @@ struct SceneButtons: View {
                 anchorEntity.removeFromParent()
             }
             sceneManager.anchorEntities.removeAll()
+            sceneManager.fallbackArtifactAnchorEntity?.removeFromParent()
+            sceneManager.fallbackArtifactAnchorEntity = nil
+            sceneManager.fallbackRestoredModelArtifactIds.removeAll()
+            sceneManager.fallbackRestoredAnnotationArtifactIds.removeAll()
+
+            if let arView = sceneManager.arView, let anchors = arView.session.currentFrame?.anchors {
+                for anchor in anchors {
+                    guard let name = anchor.name else { continue }
+                    if name.hasPrefix(anchorNamePrefix) || name.hasPrefix(annotationNamePrefix) {
+                        arView.session.remove(anchor: anchor)
+                    }
+                }
+            }
 
             for (_, tv) in sceneManager.annotationViews {
                 tv.removeFromSuperview()
@@ -223,6 +236,7 @@ struct SceneButtons: View {
             sceneManager.artifactOwnerBadgeViews.removeAll()
             sceneManager.artifactOwnerBadgeWorldPositions.removeAll()
             sceneManager.artifactOwnerBadgeOffsetsY.removeAll()
+            sceneManager.artifactOwnerBadgeOwnerUids.removeAll()
 
             NotificationCenter.default.post(name: .clearAllAnnotations, object: nil)
             NotificationCenter.default.post(name: .clearAllDrawingStrokes, object: nil)

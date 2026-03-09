@@ -54,6 +54,7 @@ final class CloudSceneStore {
                 "ownerUid": uid,
                 "name": name,
                 "storagePath": ref.fullPath,
+                "savedAt": Timestamp(date: Date()),
                 "updatedAt": Timestamp(date: Date()),
                 "bytes": data.count
             ]

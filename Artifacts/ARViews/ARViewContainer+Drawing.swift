@@ -218,6 +218,7 @@ extension ARViewContainer {
             self.sceneManager.artifactOwnerBadgeViews[artifactId] = nil
             self.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = nil
             self.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = nil
+            self.sceneManager.artifactOwnerBadgeOwnerUids[artifactId] = nil
         }
     }
 
@@ -387,6 +388,7 @@ extension ARViewContainer.Coordinator {
                 self.parent.sceneManager.artifactOwnerBadgeViews[artifactId] = nil
                 self.parent.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = nil
                 self.parent.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = nil
+                self.parent.sceneManager.artifactOwnerBadgeOwnerUids[artifactId] = nil
             }
         }
         let clear = NotificationCenter.default.addObserver(

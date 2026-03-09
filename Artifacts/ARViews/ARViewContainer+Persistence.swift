@@ -183,6 +183,7 @@ extension ARViewContainer {
         self.sceneManager.artifactOwnerBadgeViews.removeAll(keepingCapacity: true)
         self.sceneManager.artifactOwnerBadgeWorldPositions.removeAll(keepingCapacity: true)
         self.sceneManager.artifactOwnerBadgeOffsetsY.removeAll(keepingCapacity: true)
+        self.sceneManager.artifactOwnerBadgeOwnerUids.removeAll(keepingCapacity: true)
 
         for (_, view) in self.sceneManager.annotationViews { view.removeFromSuperview() }
         for (_, btn) in self.sceneManager.deleteButtons { btn.removeFromSuperview() }
@@ -332,8 +333,12 @@ extension ARViewContainer {
             let root = self.ensureFallbackArtifactRoot(in: arView)
             let entity = prototype.clone(recursive: true)
             entity.generateCollisionShapes(recursive: true)
-            entity.transform.matrix = record.transform
-            root.addChild(entity)
+
+            // Keep the model's authored local scale by applying world transform on a parent.
+            let worldContainer = Entity()
+            worldContainer.transform.matrix = record.transform
+            worldContainer.addChild(entity)
+            root.addChild(worldContainer)
             self.sceneManager.fallbackRestoredModelArtifactIds.insert(record.artifactId)
             let pos = SIMD3<Float>(
                 record.transform.columns.3.x,
