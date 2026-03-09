@@ -31,6 +31,7 @@ struct QuickProfileView: View {
 
     @State private var selectedArtifact: ArtifactMapItem?
     @State private var didAutoCenter = false
+    @State private var showArtifactManager = false
 
     // Profile photo
     @State private var profileImageURL: String? = nil
@@ -91,6 +92,10 @@ struct QuickProfileView: View {
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(image: $selectedProfileImage)
                 .ignoresSafeArea()
+        }
+        .sheet(isPresented: $showArtifactManager){
+            MyArtifactsView(artifacts: artifacts)
+                .presentationDetents([.medium, .large])
         }
         .onChange(of: selectedProfileImage) { newImage in
             guard let newImage else { return }
@@ -207,8 +212,14 @@ struct QuickProfileView: View {
                 StatChip(title: "Friends", value: "\(friendCount)", icon: "person.2.fill")
             }
             .buttonStyle(.plain)
-
-            StatChip(title: "Artifacts", value: "\(artifacts.count)", icon: "mappin.and.ellipse")
+            
+            Button {
+                showArtifactManager = true
+            } label: {
+                StatChip(title: "Artifacts", value: "\(artifacts.count)", icon: "mappin.and.ellipse")
+            }
+            .buttonStyle(.plain)
+            
         }
     }
 

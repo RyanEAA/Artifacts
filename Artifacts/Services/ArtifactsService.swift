@@ -235,6 +235,13 @@ final class ArtifactsService {
 
         try await db.collection("artifacts").document(artifactId).setData(doc, merge: true)
     }
+    
+    func deleteArtifact(artifactId: String){
+        Firestore.firestore()
+            .collection("artifacts")
+            .document(artifactId)
+            .delete()
+    }
 
     // MARK: - Helpers
 
