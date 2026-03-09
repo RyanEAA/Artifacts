@@ -6,28 +6,53 @@
 import RealityKit
 import ARKit
 import UIKit
+import FirebaseAuth
 
 extension ARViewContainer {
 
-    private func currentSceneIdForArtifacts() -> String {
+    func writableSceneIdForArtifactWrites() async throws -> String {
+        let preferred = self.sceneManager.selectedCloudSceneId
+
+        let resolution = try await withCheckedThrowingContinuation { continuation in
+            CloudSceneStore.resolveWritableSceneId(preferredSceneId: preferred) { result in
+                continuation.resume(with: result)
+            }
+        }
+
+        self.sceneManager.selectedCloudSceneId = resolution.sceneId
+        self.sceneManager.selectedCloudSceneStoragePath = nil
+
+        try await withCheckedThrowingContinuation { continuation in
+            CloudSceneStore.ensureSceneDocumentExists(sceneId: resolution.sceneId) { result in
+                continuation.resume(with: result)
+            }
+        }
+
+        return resolution.sceneId
+    }
+
+    func currentSceneIdForArtifacts() -> String {
         if let id = self.sceneManager.selectedCloudSceneId, !id.isEmpty {
             return id
         }
         let newId = UUID().uuidString
         self.sceneManager.selectedCloudSceneId = newId
+        self.sceneManager.selectedCloudSceneStoragePath = nil
         return newId
     }
 
-    private func saveModelToFirestore(modelName: String, transform: simd_float4x4) {
-        let sceneId = currentSceneIdForArtifacts()
-        let artifactId = UUID().uuidString
-
+    private func saveModelToFirestore(
+        artifactId: String,
+        modelName: String,
+        transform: simd_float4x4,
+        in arView: ARView
+    ) {
         let coordinate = LocationService.shared.currentCoordinate
-
-        print("🟩 Saving model artifact modelName:", modelName, "sceneId:", sceneId, "artifactId:", artifactId)
 
         Task {
             do {
+                let sceneId = try await writableSceneIdForArtifactWrites()
+                print("🟩 Saving model artifact modelName:", modelName, "sceneId:", sceneId, "artifactId:", artifactId)
                 try await ArtifactsService.shared.createModelArtifact(
                     artifactId: artifactId,
                     modelName: modelName,
@@ -54,7 +79,7 @@ extension ARViewContainer {
 
             if let anchor = modelAnchor.anchor {
                 self.place(modelEntity, for: anchor, in: arView)
-                saveModelToFirestore(modelName: modelAnchor.model.name, transform: anchor.transform)
+                self.sceneManager.markRestoredModelIfAwaiting()
 
             } else if let transform = getTransformForPlacement(in: arView) {
                 let anchorName = anchorNamePrefix + modelAnchor.model.name
@@ -62,7 +87,26 @@ extension ARViewContainer {
                 self.place(modelEntity, for: anchor, in: arView)
                 arView.session.add(anchor: anchor)
                 self.placementSettings.recentlyPlaced.append(modelAnchor.model)
-                saveModelToFirestore(modelName: modelAnchor.model.name, transform: transform)
+                let artifactId = UUID().uuidString
+                let ownerUid = Auth.auth().currentUser?.uid ?? ""
+                let pos = SIMD3<Float>(
+                    transform.columns.3.x,
+                    transform.columns.3.y,
+                    transform.columns.3.z
+                )
+                self.upsertArtifactOwnerBadge(
+                    artifactId: artifactId,
+                    ownerUid: ownerUid,
+                    worldPosition: pos,
+                    yOffset: -40,
+                    on: arView
+                )
+                saveModelToFirestore(
+                    artifactId: artifactId,
+                    modelName: modelAnchor.model.name,
+                    transform: transform,
+                    in: arView
+                )
             }
         }
 
@@ -74,7 +118,8 @@ extension ARViewContainer {
         clonedEntity.generateCollisionShapes(recursive: true)
         arView.installGestures([.rotation, .translation], for: clonedEntity)
 
-        let anchorEntity = AnchorEntity(plane: .any)
+        // Bind the rendered entity to the exact ARAnchor transform from placement/reload.
+        let anchorEntity = AnchorEntity(.anchor(identifier: anchor.identifier))
         anchorEntity.addChild(clonedEntity)
         arView.scene.addAnchor(anchorEntity)
 
@@ -82,46 +127,36 @@ extension ARViewContainer {
     }
 
     func getTransformForPlacement(in arView: ARView) -> simd_float4x4? {
-        guard let query = arView.makeRaycastQuery(
-            from: arView.center,
-            allowing: .estimatedPlane,
-            alignment: .any
-        ),
-        let result = arView.session.raycast(query).first else { return nil }
-        return result.worldTransform
+        return bestPlacementTransform(in: arView, from: arView.center)
     }
 
     func getTransformForPlacement(in arView: ARView, at point: CGPoint) -> simd_float4x4? {
-        guard let query = arView.makeRaycastQuery(
-            from: point,
-            allowing: .estimatedPlane,
-            alignment: .any
-        ),
-        let result = arView.session.raycast(query).first else { return nil }
-        return result.worldTransform
+        return bestPlacementTransform(in: arView, from: point)
+            ?? bestPlacementTransform(in: arView, from: arView.center)
+    }
+
+    private func bestPlacementTransform(in arView: ARView, from point: CGPoint) -> simd_float4x4? {
+        let targets: [ARRaycastQuery.Target] = [
+            .existingPlaneGeometry,
+            .existingPlaneInfinite,
+            .estimatedPlane
+        ]
+        let alignments: [ARRaycastQuery.TargetAlignment] = [.any, .horizontal, .vertical]
+
+        for target in targets {
+            for alignment in alignments {
+                guard let query = arView.makeRaycastQuery(
+                    from: point,
+                    allowing: target,
+                    alignment: alignment
+                ) else { continue }
+
+                if let result = arView.session.raycast(query).first {
+                    return result.worldTransform
+                }
+            }
+        }
+
+        return nil
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

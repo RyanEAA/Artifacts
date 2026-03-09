@@ -33,18 +33,14 @@ struct DrawingToolbarView: View {
 
         return AnyView(
             VStack(spacing: 10) {
-
-                // ── Row 1: Draw mode toggle + brush size ──────────────
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     DrawModeToggle(dm: dm)
+                        .frame(width: 178)
 
-                    Spacer()
-
-                    // Brush size slider with tiny/large dot icons
-                    HStack(spacing: 6) {
+                    HStack(spacing: 8) {
                         Image(systemName: "circle.fill")
                             .font(.system(size: 7))
-                            .foregroundColor(.white.opacity(0.5))
+                            .foregroundColor(.white.opacity(0.45))
                         Slider(
                             value: Binding(
                                 get: { Double(dm.brushSize * 1000) },
@@ -53,54 +49,56 @@ struct DrawingToolbarView: View {
                             in: 2...14
                         )
                         .tint(Color("MintGreen"))
-                        .frame(maxWidth: 130)
                         Image(systemName: "circle.fill")
-                            .font(.system(size: 15))
-                            .foregroundColor(.white.opacity(0.5))
+                            .font(.system(size: 14))
+                            .foregroundColor(.white.opacity(0.72))
                     }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color.white.opacity(0.04))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
 
-                // ── Row 2: Colour palette ─────────────────────────────
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(palette, id: \.self) { uiColor in
-                            ColorSwatch(
-                                uiColor: uiColor,
-                                isSelected: uiColor.cgColor == dm.brushColor.cgColor
-                            ) {
-                                dm.brushColor = uiColor
+                HStack(spacing: 10) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(palette, id: \.self) { uiColor in
+                                ColorSwatch(
+                                    uiColor: uiColor,
+                                    isSelected: uiColor.cgColor == dm.brushColor.cgColor
+                                ) {
+                                    dm.brushColor = uiColor
+                                }
                             }
                         }
+                        .padding(.horizontal, 1)
                     }
-                }
 
-                // ── Row 3: Action buttons ─────────────────────────────
-                HStack(spacing: 10) {
-                    // Undo
                     DrawToolbarButton(icon: "arrow.uturn.backward",
                                       label: "Undo",
                                       disabled: !dm.canUndo) {
                         NotificationCenter.default.post(name: .undoLastDrawingStroke, object: nil)
                     }
 
-                    Spacer()
-
-                    // Clear all
-                    DrawToolbarButton(icon: "trash", label: "Clear") {
+                    DrawToolbarButton(icon: "trash",
+                                      label: "Clear") {
                         NotificationCenter.default.post(name: .clearAllDrawingStrokes, object: nil)
                     }
 
-                    Spacer()
-
-                    // Done
-                    DrawToolbarButton(icon: "checkmark", label: "Done", accent: true) {
+                    DrawToolbarButton(icon: "checkmark",
+                                      label: "Done",
+                                      accent: true) {
                         placementSettings.selectedTool = .none
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .background(Color.black.opacity(0.40))
+            .padding(18)
+            .frame(maxWidth: 500)
+            .background(Color.black.opacity(0.36))
             .overlay(
                 RoundedRectangle(cornerRadius: 22)
                     .stroke(Color.white.opacity(0.10), lineWidth: 1)
@@ -131,6 +129,7 @@ private struct DrawModeToggle: View {
                 selected: dm.drawMode == .surface
             ) { dm.drawMode = .surface }
         }
+        .frame(height: 40)
         .background(Color.white.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
@@ -154,8 +153,8 @@ private struct ModeButton: View {
                 Text(label)
                     .font(.custom("Poppins-SemiBold", size: 10))
             }
+            .frame(maxWidth: .infinity)
             .foregroundColor(selected ? Color.black.opacity(0.9) : Color.white.opacity(0.6))
-            .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .background(selected ? Color("MintGreen") : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 11))
@@ -174,17 +173,19 @@ private struct ColorSwatch: View {
 
     var body: some View {
         Button(action: action) {
-            Circle()
-                .fill(Color(uiColor))
-                .frame(width: 28, height: 28)
-                .overlay(Circle().stroke(Color.white.opacity(isSelected ? 0.9 : 0.0), lineWidth: 2.5))
-                .overlay(
-                    // Dark ring so white swatch is visible
-                    Circle().stroke(Color.black.opacity(0.15), lineWidth: 1)
-                )
-                .shadow(color: Color(uiColor).opacity(isSelected ? 0.7 : 0), radius: 6)
-                .scaleEffect(isSelected ? 1.18 : 1.0)
-                .animation(.spring(response: 0.2, dampingFraction: 0.6), value: isSelected)
+            ZStack {
+                Circle()
+                    .fill(Color(uiColor))
+                    .frame(width: 28, height: 28)
+                    .overlay(
+                        Circle().stroke(Color.black.opacity(0.15), lineWidth: 1)
+                    )
+                Circle()
+                    .stroke(Color.white.opacity(isSelected ? 0.95 : 0), lineWidth: 2)
+                    .frame(width: 32, height: 32)
+            }
+            .frame(width: 34, height: 34)
+            .animation(.easeInOut(duration: 0.15), value: isSelected)
         }
         .buttonStyle(.plain)
     }
@@ -212,7 +213,7 @@ private struct DrawToolbarButton: View {
                     .font(.custom("Poppins-SemiBold", size: 13))
             }
             .foregroundColor(fg)
-            .padding(.horizontal, 13)
+            .padding(.horizontal, 11)
             .padding(.vertical, 9)
             .background(bg)
             .overlay(RoundedRectangle(cornerRadius: 13).stroke(border, lineWidth: 1))

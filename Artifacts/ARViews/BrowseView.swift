@@ -221,14 +221,20 @@ struct HorizontalGrid: View {
                     ForEach(0..<items.count, id: \.self) { index in
                         let model = items[index]
                         ItemButton(model: model) {
+                            placementSettings.isModelLoadInProgress = true
+                            placementSettings.modelLoadMessage = "Loading \(model.name)..."
+                            self.showBrowse = false
+
                             model.asyncLoadModelEntity { completed, _ in
-                                if completed {
-//                                    self.placementSettings.selectedModel = model
-                                    self.placementSettings.selectedTool = .model(model)
+                                DispatchQueue.main.async {
+                                    placementSettings.isModelLoadInProgress = false
+                                    placementSettings.modelLoadMessage = ""
+                                    if completed {
+                                        self.placementSettings.selectedTool = .model(model)
+                                    }
                                 }
                             }
                             print("BrowseView: selected \(model.name) for placement")
-                            self.showBrowse = false
                         }
                     }
                 }

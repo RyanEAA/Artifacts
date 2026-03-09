@@ -84,12 +84,16 @@ final class ChatService {
         // Ensure thread exists and participants are set.
         try await threadRef.setData([
             "participants": [myUid, recipientUid],
+            "lastMessageSenderUid": myUid,
+            "lastMessageText": clean,
+            "lastMessageAt": FieldValue.serverTimestamp(),
             "updatedAt": FieldValue.serverTimestamp()
         ], merge: true)
 
         // Write both a local timestamp (immediate UI ordering) and a server timestamp (canonical).
         try await msgRef.setData([
             "senderUid": myUid,
+            "recipientUid": recipientUid,
             "text": clean,
             "clientCreatedAt": Timestamp(date: Date()),
             "createdAt": FieldValue.serverTimestamp()

@@ -41,8 +41,10 @@ final class SessionManager: ObservableObject {
                 self.user = user
                 self.isLoading = false
                 if let user {
+                    NotificationService.shared.start(for: user.uid)
                     self.fetchUserData(uid: user.uid)
                 } else {
+                    NotificationService.shared.stop()
                     self.userData = nil
                     self.errorMessage = nil
                 }
@@ -162,6 +164,7 @@ final class SessionManager: ObservableObject {
     func signOut() {
         do {
             try Auth.auth().signOut()
+            NotificationService.shared.stop()
             user = nil
             userData = nil
             errorMessage = nil

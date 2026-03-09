@@ -27,6 +27,7 @@ import RealityKit
 import ARKit
 import UIKit
 import simd
+import FirebaseAuth
 
 // MARK: - SIMD3 math helpers (mirrors ARPaint's SCNVector3 extensions)
 
@@ -90,18 +91,34 @@ extension ARViewContainer {
             sceneManager.drawAnchorEntity = anchor
         }
         sceneManager.drawAnchorEntity!.addChild(bead)
-        dm.addBead(bead)
+        dm.addBead(bead, point: worldPos)
         return bead
     }
 
     /// Reference bead cache — avoids allocating new MeshResource every bead (expensive).
     private func makeReferenceBead(color: UIColor, radius: Float) -> ModelEntity {
+        let colorComponents = color.cgColor.components ?? [1, 1, 1, 1]
+        let r = colorComponents.indices.contains(0) ? colorComponents[0] : 1
+        let g = colorComponents.indices.contains(1) ? colorComponents[1] : r
+        let b = colorComponents.indices.contains(2) ? colorComponents[2] : r
+        let a = colorComponents.indices.contains(3) ? colorComponents[3] : 1
+        let key = String(
+            format: "r%.3f_g%.3f_b%.3f_a%.3f_s%.4f",
+            r, g, b, a, radius
+        )
+
+        if let cached = sceneManager.drawingBeadPrototypeCache[key] {
+            return cached
+        }
+
         let mesh = MeshResource.generateSphere(radius: radius)
         var mat  = SimpleMaterial()
         mat.color    = .init(tint: color, texture: nil)
         mat.roughness = .float(0.6)
         mat.metallic  = .float(0.0)
-        return ModelEntity(mesh: mesh, materials: [mat])
+        let entity = ModelEntity(mesh: mesh, materials: [mat])
+        sceneManager.drawingBeadPrototypeCache[key] = entity
+        return entity
     }
 
     // MARK: World position resolver
@@ -160,6 +177,141 @@ extension ARViewContainer {
 
         return camPos + rayWorld * drawDepth
     }
+
+    func saveDrawingStrokeToFirestore(_ stroke: DrawingManager.StrokeRecord, on arView: ARView) {
+        let coordinate = LocationService.shared.currentCoordinate
+
+        Task {
+            do {
+                let sceneId = try await writableSceneIdForArtifactWrites()
+                try await ArtifactsService.shared.createDrawingArtifact(
+                    artifactId: stroke.artifactId,
+                    sceneId: sceneId,
+                    points: stroke.points,
+                    colorRGBA: stroke.colorRGBA,
+                    brushSize: stroke.brushSize,
+                    coordinate: coordinate
+                )
+                if let first = stroke.points.first {
+                    self.upsertArtifactOwnerBadge(
+                        artifactId: stroke.artifactId,
+                        ownerUid: Auth.auth().currentUser?.uid ?? "",
+                        worldPosition: first,
+                        yOffset: -28,
+                        on: arView
+                    )
+                }
+            } catch {
+                print("⚠️ createDrawingArtifact error:", error.localizedDescription)
+            }
+        }
+    }
+
+    func clearAllDrawings(in arView: ARView) {
+        let drawingArtifactIds = self.sceneManager.drawingManager.strokeGroups.map(\.artifactId)
+        self.sceneManager.drawingManager.clearAll(in: arView.scene)
+        self.sceneManager.drawAnchorEntity?.removeFromParent()
+        self.sceneManager.drawAnchorEntity = nil
+        self.sceneManager.drawingBeadPrototypeCache.removeAll(keepingCapacity: true)
+        for artifactId in drawingArtifactIds {
+            self.sceneManager.artifactOwnerBadgeViews[artifactId]?.removeFromSuperview()
+            self.sceneManager.artifactOwnerBadgeViews[artifactId] = nil
+            self.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = nil
+            self.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = nil
+            self.sceneManager.artifactOwnerBadgeOwnerUids[artifactId] = nil
+        }
+    }
+
+    func restoreDrawingsFromCloud(sceneId: String, in arView: ARView) {
+        guard !sceneId.isEmpty else { return }
+        Task {
+            do {
+                let strokes = try await ArtifactsService.shared.fetchVisibleDrawingArtifacts(sceneId: sceneId)
+                await MainActor.run {
+                    var remainingPointBudget = 1800
+                    for stroke in strokes {
+                        guard !stroke.points.isEmpty else { continue }
+                        if remainingPointBudget <= 0 { break }
+
+                        let step = max(1, stroke.points.count / 240)
+                        let sampled = stride(from: 0, to: stroke.points.count, by: step)
+                            .map { stroke.points[$0] }
+                        let pointsToRender = Array(sampled.prefix(remainingPointBudget))
+                        guard !pointsToRender.isEmpty else { continue }
+                        remainingPointBudget -= pointsToRender.count
+
+                        let color = UIColor(
+                            red: CGFloat(stroke.colorRGBA.x),
+                            green: CGFloat(stroke.colorRGBA.y),
+                            blue: CGFloat(stroke.colorRGBA.z),
+                            alpha: CGFloat(stroke.colorRGBA.w)
+                        )
+                        var beads: [ModelEntity] = []
+                        for point in pointsToRender {
+                            let bead = makeReferenceBead(color: color, radius: stroke.brushSize)
+                                .clone(recursive: false)
+                            bead.position = point
+
+                            if self.sceneManager.drawAnchorEntity == nil {
+                                let anchor = AnchorEntity(world: .zero)
+                                arView.scene.addAnchor(anchor)
+                                self.sceneManager.drawAnchorEntity = anchor
+                            }
+                            self.sceneManager.drawAnchorEntity!.addChild(bead)
+                            beads.append(bead)
+                        }
+
+                        self.sceneManager.drawingManager.appendRestoredStroke(
+                            artifactId: stroke.artifactId,
+                            colorRGBA: stroke.colorRGBA,
+                            brushSize: stroke.brushSize,
+                            beads: beads,
+                            points: pointsToRender
+                        )
+                        if let first = pointsToRender.first {
+                            self.upsertArtifactOwnerBadge(
+                                artifactId: stroke.artifactId,
+                                ownerUid: stroke.ownerUid,
+                                worldPosition: first,
+                                yOffset: -28,
+                                on: arView
+                            )
+                        }
+                    }
+                }
+            } catch {
+                print("⚠️ fetchVisibleDrawingArtifacts error:", error.localizedDescription)
+            }
+        }
+    }
+
+    func restoreDrawingsAfterRelocalization(sceneId: String, in arView: ARView, maxWaitSeconds: TimeInterval = 10) {
+        guard !sceneId.isEmpty else { return }
+        let started = Date()
+
+        func attempt() {
+            let elapsed = Date().timeIntervalSince(started)
+            let timedOut = elapsed >= maxWaitSeconds
+
+            if self.sceneManager.isAwaitingVisibleArtifactsAfterLoad, !timedOut {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    attempt()
+                }
+                return
+            }
+
+            if self.sceneManager.isAwaitingVisibleArtifactsAfterLoad && timedOut {
+                // Fallback: when world-map relocalization doesn't re-add anchors in time,
+                // restore models/annotations directly from artifact transforms.
+                self.restoreVisibleModelsAndAnnotationsFromCloud(sceneId: sceneId, in: arView)
+            }
+            self.restoreDrawingsFromCloud(sceneId: sceneId, in: arView)
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            attempt()
+        }
+    }
 }
 
 // MARK: - Pan Gesture + Frame-Update Drawing on Coordinator
@@ -180,7 +332,10 @@ extension ARViewContainer.Coordinator {
             currentFingerPosition = gesture.location(in: arView)
 
         case .ended, .cancelled:
-            parent.sceneManager.drawingManager.endStroke()
+            if let stroke = parent.sceneManager.drawingManager.endStroke(),
+               let arView = arView {
+                parent.saveDrawingStrokeToFirestore(stroke, on: arView)
+            }
             currentFingerPosition = nil
 
         default:
@@ -191,30 +346,28 @@ extension ARViewContainer.Coordinator {
     // MARK: Per-frame draw tick — called from ARSessionDelegate.session(_:didUpdate:)
 
     /// Call this from your existing `session(_:didUpdate:)` delegate method.
-    func tickDrawing(frame: ARFrame) {
+    func tickDrawing() {
         guard case .draw = parent.placementSettings.selectedTool else { return }
         guard let arView = arView,
               let fingerPos = currentFingerPosition else { return }
 
-        guard let currentPoint = parent.worldPoint(for: fingerPos, in: arView) else { return }
+        guard let rawPoint = parent.worldPoint(for: fingerPos, in: arView) else { return }
 
         let dm      = parent.sceneManager.drawingManager
-        let spacing = dm.brushSize * 0.8   // gap-fill spacing proportional to brush size
+        let currentPoint = dm.smoothPoint(rawPoint)
+        let spacing = max(dm.brushSize * 0.85, 0.0018)
 
         if let prev = dm.previousPoint {
             let dist = prev.distance(to: currentPoint)
-            // Minimum movement threshold — avoids placing beads when finger is stationary
-            // Matches ARPaint's 0.00104 threshold scaled to our brush size
-            guard dist > spacing * 0.25 else { return }
+            guard dist > max(spacing * 0.40, 0.0010) else { return }
 
-            // Fill any gap between frames with interpolated beads (ARPaint key technique)
-            let filled = interpolatedPositions(from: prev, to: currentPoint, spacing: spacing)
+            let filled = Array(
+                interpolatedPositions(from: prev, to: currentPoint, spacing: spacing).prefix(80)
+            )
             filled.forEach { parent.placeBead(at: $0, in: arView) }
 
-            // Always place one at the exact current position
             parent.placeBead(at: currentPoint, in: arView)
         } else {
-            // First bead of this stroke
             parent.placeBead(at: currentPoint, in: arView)
         }
 
@@ -229,14 +382,21 @@ extension ARViewContainer.Coordinator {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.parent.sceneManager.drawingManager.undoLastStroke(in: arView.scene)
+            guard let self = self else { return }
+            if let artifactId = self.parent.sceneManager.drawingManager.undoLastStroke(in: arView.scene) {
+                self.parent.sceneManager.artifactOwnerBadgeViews[artifactId]?.removeFromSuperview()
+                self.parent.sceneManager.artifactOwnerBadgeViews[artifactId] = nil
+                self.parent.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = nil
+                self.parent.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = nil
+                self.parent.sceneManager.artifactOwnerBadgeOwnerUids[artifactId] = nil
+            }
         }
         let clear = NotificationCenter.default.addObserver(
             forName: .clearAllDrawingStrokes,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.parent.sceneManager.drawingManager.clearAll(in: arView.scene)
+            self?.parent.clearAllDrawings(in: arView)
         }
         notificationObservers.append(contentsOf: [undo, clear])
     }

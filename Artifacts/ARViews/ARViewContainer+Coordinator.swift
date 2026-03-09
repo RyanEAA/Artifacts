@@ -10,6 +10,7 @@
 import RealityKit
 import ARKit
 import UIKit
+import FirebaseAuth
 
 extension ARViewContainer {
 
@@ -25,6 +26,8 @@ extension ARViewContainer {
         /// Tracks the current finger screen position while drawing.
         /// Set by handleDrawPan; consumed by tickDrawing on every AR frame.
         var currentFingerPosition: CGPoint? = nil
+        /// Prevents queueing unbounded draw ticks on the main thread.
+        var isDrawingTickScheduled: Bool = false
 
         /// Notification observers retained for the lifetime of the coordinator.
         var notificationObservers: [NSObjectProtocol] = []
@@ -59,6 +62,19 @@ extension ARViewContainer {
                         if let override = parent.sceneManager.annotationTextOverrides[data.id.uuidString] {
                             data.text = override
                         }
+                        let ownerUid = parent.sceneManager.selectedSceneOwnerUid ?? Auth.auth().currentUser?.uid ?? ""
+                        let pos = SIMD3<Float>(
+                            anchor.transform.columns.3.x,
+                            anchor.transform.columns.3.y,
+                            anchor.transform.columns.3.z
+                        )
+                        parent.upsertArtifactOwnerBadge(
+                            artifactId: data.id.uuidString,
+                            ownerUid: ownerUid,
+                            worldPosition: pos,
+                            yOffset: -84,
+                            on: arView
+                        )
                         parent.attachAnnotationView(for: anchor, data: data, on: arView)
                     }
                 }
@@ -66,11 +82,26 @@ extension ARViewContainer {
                 if let anchorName = anchor.name, anchorName.hasPrefix(anchorNamePrefix) {
                     let modelName = anchorName.dropFirst(anchorNamePrefix.count)
                     print("ARSession: didAdd anchor for modelName: \(modelName)")
+                    let ownerUid = parent.sceneManager.selectedSceneOwnerUid ?? Auth.auth().currentUser?.uid ?? ""
+                    if !ownerUid.isEmpty {
+                        let pos = SIMD3<Float>(
+                            anchor.transform.columns.3.x,
+                            anchor.transform.columns.3.y,
+                            anchor.transform.columns.3.z
+                        )
+                        parent.upsertArtifactOwnerBadge(
+                            artifactId: "model-anchor-\(anchor.identifier.uuidString)",
+                            ownerUid: ownerUid,
+                            worldPosition: pos,
+                            yOffset: -40,
+                            on: arView
+                        )
+                    }
 
                     guard let model = parent.modelsViewModel.models
                         .first(where: { $0.name == modelName }) else {
                         print("Unable to retrieve model from modelsViewModel")
-                        return
+                        continue
                     }
 
                     if model.modelEntity == nil {
@@ -83,6 +114,10 @@ extension ARViewContainer {
                                 print("Adding modelAnchor with name: \(model.name)")
                             }
                         }
+                    } else {
+                        let modelAnchor = ModelAnchor(model: model, anchor: anchor)
+                        self.parent.placementSettings.modelsConfirmedForPlacement
+                            .append(modelAnchor)
                     }
                 }
             }
@@ -91,8 +126,13 @@ extension ARViewContainer {
         // MARK: - ARSessionDelegate: Frame Update (drives smooth drawing)
 
         func session(_ session: ARSession, didUpdate frame: ARFrame) {
+            guard case .draw = parent.placementSettings.selectedTool else { return }
+            guard currentFingerPosition != nil else { return }
+            guard !isDrawingTickScheduled else { return }
+            isDrawingTickScheduled = true
             DispatchQueue.main.async {
-                self.tickDrawing(frame: frame)
+                self.tickDrawing()
+                self.isDrawingTickScheduled = false
             }
         }
 
@@ -126,6 +166,12 @@ extension ARViewContainer {
             parent.sceneManager.annotationAnchors[id] = nil
             parent.sceneManager.isEditing[id]         = nil
             parent.sceneManager.hasBeenTapped[id]     = nil
+            let artifactId = id.uuidString
+            parent.sceneManager.artifactOwnerBadgeViews[artifactId]?.removeFromSuperview()
+            parent.sceneManager.artifactOwnerBadgeViews[artifactId] = nil
+            parent.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = nil
+            parent.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = nil
+            parent.sceneManager.artifactOwnerBadgeOwnerUids[artifactId] = nil
         }
 
         // MARK: - Tap Gesture (Annotation Placement & Editing)

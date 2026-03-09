@@ -21,6 +21,7 @@ struct QuickProfileView: View {
 
     @State private var friendCount: Int = 0
     @State private var friends: [String] = []
+    @State private var friendUIDs: [String] = []
     @State private var friendsListener: ListenerRegistration?
 
     @State private var artifacts: [ArtifactMapItem] = []
@@ -30,8 +31,15 @@ struct QuickProfileView: View {
     @State private var showFullMap = false
 
     @State private var selectedArtifact: ArtifactMapItem?
+    @State private var selectedClusterID: String?
     @State private var didAutoCenter = false
+
     @State private var showArtifactManager = false
+
+
+    @State private var lastObservedUID: String? = nil
+    @State private var ownerAvatarURLs: [String: String] = [:]
+    @State private var activeArtifactOwnerUIDs: Set<String> = []
 
     // Profile photo
     @State private var profileImageURL: String? = nil
@@ -51,6 +59,16 @@ struct QuickProfileView: View {
     }
 
     private var hasArtifacts: Bool { !artifacts.isEmpty }
+    private var clusters: [ArtifactCluster] {
+        ArtifactMapClusterer.makeClusters(items: artifacts)
+    }
+    private var currentUID: String? {
+        Auth.auth().currentUser?.uid
+    }
+    private var myArtifactCount: Int {
+        guard let uid = currentUID else { return 0 }
+        return artifacts.filter { $0.ownerUid == uid }.count
+    }
 
     var body: some View {
         GeometryReader { _ in
@@ -77,10 +95,9 @@ struct QuickProfileView: View {
         }
         .sheet(isPresented: $showFriends) {
             FriendsListSheet(friends: $friends)
-                .presentationDetents([.medium, .large])
         }
         .fullScreenCover(isPresented: $showFullMap) {
-            FullMapView(region: region, artifacts: artifacts) { newRegion in
+            FullMapView(region: region, artifacts: artifacts, ownerAvatarURLs: ownerAvatarURLs) { newRegion in
                 region = newRegion
             }
         }
@@ -108,15 +125,24 @@ struct QuickProfileView: View {
         }
         .onAppear {
             profileImageURL = (session.userData?["profilePictureURL"] as? String)
-            startFriendsListener()
-            startArtifactsListener()
+            handleAuthContextChange(to: session.user?.uid)
         }
         .onDisappear {
             friendsListener?.remove()
             artifactsListener?.remove()
         }
+        .onChange(of: session.user?.uid) { newUID in
+            handleAuthContextChange(to: newUID)
+        }
         .onChange(of: session.userData?["profilePictureURL"] as? String) { newValue in
             profileImageURL = newValue
+            if let myUid = currentUID {
+                if let newValue, !newValue.isEmpty {
+                    ownerAvatarURLs[myUid] = newValue
+                } else {
+                    ownerAvatarURLs.removeValue(forKey: myUid)
+                }
+            }
         }
     }
 
@@ -212,14 +238,8 @@ struct QuickProfileView: View {
                 StatChip(title: "Friends", value: "\(friendCount)", icon: "person.2.fill")
             }
             .buttonStyle(.plain)
-            
-            Button {
-                showArtifactManager = true
-            } label: {
-                StatChip(title: "Artifacts", value: "\(artifacts.count)", icon: "mappin.and.ellipse")
-            }
-            .buttonStyle(.plain)
-            
+
+            StatChip(title: "Artifacts", value: "\(artifacts.count)", icon: "mappin.and.ellipse")
         }
     }
 
@@ -247,23 +267,28 @@ struct QuickProfileView: View {
             }
 
             ZStack(alignment: .bottomLeading) {
-                Map(coordinateRegion: $region, annotationItems: artifacts) { item in
-                    MapAnnotation(coordinate: offsetCoordinate(for: item)) {
-                        ArtifactPin(isSelected: selectedArtifact?.id == item.id)
-                            .onTapGesture {
+                Map(coordinateRegion: $region, annotationItems: clusters) { cluster in
+                    MapAnnotation(coordinate: cluster.coordinate) {
+                        ArtifactMarkerView(
+                            owners: markerOwners(for: cluster),
+                            isSelected: selectedClusterID == cluster.id
+                        )
+                        .onTapGesture {
+                            DispatchQueue.main.async {
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                withAnimation(.easeInOut(duration: 0.30)) {
-                                    region.center = item.coordinate
-                                }
-                                openAppleMapsForArtifact(item)
+                                selectedClusterID = cluster.id
+                                handleClusterTap(cluster)
                             }
-                            .onLongPressGesture {
+                        }
+                        .onLongPressGesture {
+                            DispatchQueue.main.async {
                                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                selectedArtifact = item
-                                withAnimation(.easeInOut(duration: 0.30)) {
-                                    region.center = item.coordinate
+                                selectedClusterID = cluster.id
+                                if let item = cluster.items.first {
+                                    selectedArtifact = item
                                 }
                             }
+                        }
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -329,37 +354,26 @@ struct QuickProfileView: View {
         .buttonStyle(.plain)
     }
     
-    private func duplicates(for item: ArtifactMapItem) -> [ArtifactMapItem] {
-        artifacts.filter {
-            $0.coordinate.latitude == item.coordinate.latitude &&
-            $0.coordinate.longitude == item.coordinate.longitude
-        }
-    }
-
-    private func offsetCoordinate(for item: ArtifactMapItem) -> CLLocationCoordinate2D {
-        let group = duplicates(for: item)
-
-        guard group.count > 1,
-              let index = group.firstIndex(where: { $0.id == item.id })
-        else {
-            return item.coordinate
+    private func handleClusterTap(_ cluster: ArtifactCluster) {
+        withAnimation(.easeInOut(duration: 0.30)) {
+            region.center = cluster.coordinate
         }
 
-        let radius: Double = 0.00008
-        let angleStep = (2 * Double.pi) / Double(group.count)
-        let angle = angleStep * Double(index)
-
-        return CLLocationCoordinate2D(
-            latitude: item.coordinate.latitude + radius * cos(angle),
-            longitude: item.coordinate.longitude + radius * sin(angle)
-        )
+        if let item = cluster.items.first {
+            openAppleMapsForArtifact(item)
+        }
     }
 
     private func startFriendsListener() {
+        friendsListener?.remove()
         do {
             friendsListener = try friendsService.listenFriendUIDs { uids in
                 Task {
-                    await MainActor.run { self.friendCount = uids.count }
+                    await MainActor.run {
+                        self.friendCount = uids.count
+                        self.friendUIDs = uids
+                        self.refreshArtifactsListener()
+                    }
 
                     let users = try? await friendsService.fetchUsernames(for: uids)
                     let names = (users ?? [])
@@ -374,22 +388,94 @@ struct QuickProfileView: View {
         }
     }
 
-    private func startArtifactsListener() {
-        do {
-            artifactsListener = try artifactsService.listenMyPublishedArtifacts { items in
-                Task { @MainActor in
-                    self.artifacts = items
+    private func handleAuthContextChange(to newUID: String?) {
+        guard lastObservedUID != newUID else { return }
+        lastObservedUID = newUID
 
-                    if !didAutoCenter, let first = items.first {
-                        didAutoCenter = true
-                        withAnimation(.easeInOut(duration: 0.35)) {
-                            region.center = first.coordinate
-                        }
+        friendsListener?.remove()
+        artifactsListener?.remove()
+
+        didAutoCenter = false
+        selectedClusterID = nil
+        selectedArtifact = nil
+
+        friendCount = 0
+        friends = []
+        friendUIDs = []
+        artifacts = []
+        ownerAvatarURLs = [:]
+        activeArtifactOwnerUIDs = []
+
+        guard newUID != nil else { return }
+
+        startFriendsListener()
+        refreshArtifactsListener()
+    }
+
+    private func refreshArtifactsListener() {
+        artifactsListener?.remove()
+        artifactsListener = artifactsService.listenMyAndFriendsPublishedArtifacts(friendUIDs: friendUIDs) { items in
+            Task { @MainActor in
+                self.artifacts = items
+                let ownerUIDSet = Set(items.map(\.ownerUid))
+                if ownerUIDSet != self.activeArtifactOwnerUIDs {
+                    self.activeArtifactOwnerUIDs = ownerUIDSet
+                    Task { await updateOwnerAvatarURLs(for: Array(ownerUIDSet)) }
+                }
+
+                if !didAutoCenter, let first = items.first {
+                    didAutoCenter = true
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        region.center = first.coordinate
                     }
                 }
             }
+        }
+    }
+
+    private func updateOwnerAvatarURLs(for ownerUIDs: [String]) async {
+        guard !ownerUIDs.isEmpty else {
+            await MainActor.run { ownerAvatarURLs = [:] }
+            return
+        }
+
+        do {
+            let users = try await friendsService.fetchUsernames(for: ownerUIDs)
+            var merged: [String: String] = [:]
+            for user in users {
+                if let url = user.profilePictureURL, !url.isEmpty {
+                    merged[user.id] = url
+                }
+            }
+
+            if let myUid = Auth.auth().currentUser?.uid,
+               let profileImageURL,
+               !profileImageURL.isEmpty {
+                merged[myUid] = profileImageURL
+            }
+
+            await MainActor.run {
+                ownerAvatarURLs = merged
+            }
         } catch {
-            print("⚠️ listenMyPublishedArtifacts failed:", error)
+            print("⚠️ updateOwnerAvatarURLs failed:", error.localizedDescription)
+        }
+    }
+
+    private func avatarURL(for ownerUid: String) -> String? {
+        if ownerUid == currentUID {
+            return profileImageURL ?? ownerAvatarURLs[ownerUid]
+        }
+        return ownerAvatarURLs[ownerUid]
+    }
+
+    private func markerOwners(for cluster: ArtifactCluster) -> [ArtifactMarkerOwner] {
+        cluster.ownerArtifactCounts.map { bucket in
+            ArtifactMarkerOwner(
+                ownerUid: bucket.ownerUid,
+                imageURL: avatarURL(for: bucket.ownerUid),
+                count: bucket.count
+            )
         }
     }
 
@@ -403,7 +489,9 @@ struct QuickProfileView: View {
             MKLaunchOptionsShowsTrafficKey: true
         ]
 
-        MKMapItem.openMaps(with: [mapItem], launchOptions: launchOptions)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            MKMapItem.openMaps(with: [mapItem], launchOptions: launchOptions)
+        }
     }
 
     private func uploadProfileImage(_ image: UIImage) {
@@ -473,6 +561,8 @@ struct QuickProfileView: View {
                         }
 
                         self.profileImageURL = urlString
+                        self.selectedProfileImage = nil
+                        self.ownerAvatarURLs[uid] = urlString
 
                         var updated = self.session.userData ?? [:]
                         updated["profilePictureURL"] = urlString
@@ -565,28 +655,6 @@ private struct StatChip: View {
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         )
         .cornerRadius(18)
-    }
-}
-
-private struct ArtifactPin: View {
-    let isSelected: Bool
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(Color.black.opacity(0.78))
-                .frame(width: isSelected ? 36 : 30, height: isSelected ? 36 : 30)
-                .overlay(
-                    Circle()
-                        .stroke(Color("MintGreen").opacity(isSelected ? 0.85 : 0.55), lineWidth: isSelected ? 2 : 1)
-                )
-
-            Image(systemName: "sparkles")
-                .font(.system(size: isSelected ? 14 : 12, weight: .bold))
-                .foregroundColor(Color("MintGreen").opacity(0.92))
-        }
-//        .shadow(color: Color.black.opacity(0.45), radius: 8, x: 0, y: 6)
-        .animation(.easeInOut(duration: 0.18), value: isSelected)
     }
 }
 
