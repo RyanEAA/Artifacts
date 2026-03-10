@@ -20,12 +20,15 @@ struct PlacementView: View {
             HStack(spacing: 14) {
                 PlacementActionButton(kind: .cancel) {
                     print("Cancel Placement Button Pressed")
+                    placementSettings.previewEntity?.removeFromParent()
+                    placementSettings.previewEntity = nil
                     placementSettings.selectedTool = .none
                 }
 
                 Spacer(minLength: 0)
 
                 // Model name in the middle
+                
                 Text(model.name)
                     .font(.custom("Poppins-SemiBold", size: 13))
                     .foregroundColor(.white.opacity(0.75))
@@ -35,9 +38,18 @@ struct PlacementView: View {
 
                 PlacementActionButton(kind: .confirm) {
                     print("Confirm Placement Button Pressed")
-                    let modelAnchor = ModelAnchor(model: model, anchor: nil)
-                    placementSettings.modelsConfirmedForPlacement.append(modelAnchor)
-                    placementSettings.selectedTool = .none
+                    if model.modelEntity == nil {
+                        model.asyncLoadModelEntity { success, error in
+                            if success {
+                                placeModel(model)
+                            }
+                        }
+                    } else {
+                        placeModel(model)
+                    }
+//                    let modelAnchor = ModelAnchor(model: model, anchor: nil)
+//                    placementSettings.modelsConfirmedForPlacement.append(modelAnchor)
+//                    placementSettings.selectedTool = .none
                 }
             }
             .padding(.horizontal, 18)
@@ -51,6 +63,11 @@ struct PlacementView: View {
             .padding(.horizontal, 18)
             .padding(.bottom, 18)
         )
+    }
+    func placeModel(_ model: Model) {
+        let modelAnchor = ModelAnchor(model: model, anchor: nil)
+        placementSettings.modelsConfirmedForPlacement.append(modelAnchor)
+        placementSettings.selectedTool = .none
     }
 }
 

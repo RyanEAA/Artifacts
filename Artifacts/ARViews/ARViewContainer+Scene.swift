@@ -68,11 +68,44 @@ extension ARViewContainer {
     }
 
     func updateScene(for arView: CustomARView) {
-        if case .model = placementSettings.selectedTool {
+        
+        // placing model
+
+        if case .model(let model) = placementSettings.selectedTool {
             arView.focusEntity?.isEnabled = true
-        } else {
-            arView.focusEntity?.isEnabled = false
-        }
+
+
+            guard let entity = model.modelEntity else { return }
+
+            // Create preview if it doesn't exist
+            if placementSettings.previewEntity == nil {
+
+                let preview = entity.clone(recursive: true)
+                preview.generateCollisionShapes(recursive: true)
+
+                placementSettings.previewEntity = preview
+
+                let anchor = AnchorEntity(world: .zero)
+                anchor.addChild(preview)
+
+                arView.scene.addAnchor(anchor)
+            }
+
+            // Update preview position every frame
+            if let transform = getTransformForPlacement(in: arView),
+               let preview = placementSettings.previewEntity,
+               let anchor = preview.anchor {
+
+                anchor.transform.matrix = transform
+            }
+
+         } else {
+             // Remove preview if user exited placement mode
+             placementSettings.previewEntity?.removeFromParent()
+             placementSettings.previewEntity = nil
+             arView.focusEntity?.isEnabled = false
+             
+         }
 
         if let modelAnchor = self.placementSettings.modelsConfirmedForPlacement.popLast(),
            let modelEntity = modelAnchor.model.modelEntity {

@@ -26,6 +26,7 @@ class PlacementSettings: ObservableObject {
 
     /// Single source of truth for what tool is active.
     @Published var selectedTool: PlacementTool = .none
+    var previewEntity: ModelEntity?
 
     /// Convenience accessor — derived from selectedTool.
     /// Read-only; set selectedTool instead.

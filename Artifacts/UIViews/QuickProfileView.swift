@@ -239,8 +239,12 @@ struct QuickProfileView: View {
             }
             .buttonStyle(.plain)
 
-            StatChip(title: "Artifacts", value: "\(artifacts.count)", icon: "mappin.and.ellipse")
-        }
+            Button {
+                showArtifactManager = true
+            } label: {
+                StatChip(title: "Artifacts", value: "\(artifacts.count)", icon: "mappin.and.ellipse")
+            }
+            .buttonStyle(.plain)        }
     }
 
     private var mapCard: some View {
@@ -574,51 +578,7 @@ struct QuickProfileView: View {
     }
 }
 
-private struct ProfileBackground: View {
-    var body: some View {
-        ZStack {
-            LinearGradient(
-                gradient: Gradient(stops: [
-                    .init(color: Color.black, location: 0.00),
-                    .init(color: Color("DarkGray").opacity(0.98), location: 0.55),
-                    .init(color: Color.black.opacity(0.96), location: 1.00)
-                ]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
 
-            LinearGradient(
-                gradient: Gradient(colors: [
-                    Color("MintGreen").opacity(0.08),
-                    Color.clear
-                ]),
-                startPoint: .topTrailing,
-                endPoint: .center
-            )
-
-            RadialGradient(
-                gradient: Gradient(colors: [
-                    Color.black.opacity(0.00),
-                    Color.black.opacity(0.55)
-                ]),
-                center: .center,
-                startRadius: 140,
-                endRadius: 620
-            )
-        }
-    }
-}
-
-private struct ProfileCardBackground: View {
-    var body: some View {
-        RoundedRectangle(cornerRadius: 18)
-            .fill(Color.black.opacity(0.46))
-            .background(
-                RoundedRectangle(cornerRadius: 18)
-                    .fill(Color.white.opacity(0.05))
-            )
-    }
-}
 
 private struct StatChip: View {
     let title: String
@@ -658,64 +618,7 @@ private struct StatChip: View {
     }
 }
 
-private struct ArtifactDetailSheet: View {
-    let item: ArtifactMapItem
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .fill(Color("MintGreen").opacity(0.16))
-                        .frame(width: 38, height: 38)
-                    Image(systemName: "mappin.and.ellipse")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(Color("MintGreen").opacity(0.92))
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title)
-                        .font(.custom("Poppins-Bold", size: 18))
-                        .foregroundColor(Color.white.opacity(0.92))
-                    Text("Scene \(item.sceneId.isEmpty ? "unknown" : item.sceneId)")
-                        .font(.custom("Poppins-Regular", size: 12))
-                        .foregroundColor(Color.white.opacity(0.60))
-                        .lineLimit(1)
-                }
-
-                Spacer()
-            }
-
-            VStack(spacing: 8) {
-                row("Latitude", String(format: "%.5f", item.coordinate.latitude))
-                row("Longitude", String(format: "%.5f", item.coordinate.longitude))
-            }
-            .padding(12)
-            .background(Color.white.opacity(0.06))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
-            )
-            .cornerRadius(14)
-
-            Spacer(minLength: 0)
-        }
-        .padding(18)
-        .background(Color.black.ignoresSafeArea())
-    }
-
-    private func row(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label)
-                .font(.custom("Poppins-Regular", size: 13))
-                .foregroundColor(Color.white.opacity(0.70))
-            Spacer()
-            Text(value)
-                .font(.custom("Poppins-SemiBold", size: 13))
-                .foregroundColor(Color.white.opacity(0.90))
-        }
-    }
-}
 
 #Preview {
     QuickProfileView()
