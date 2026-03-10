@@ -184,14 +184,30 @@ extension ARViewContainer {
     }
 
     func place(_ modelEntity: ModelEntity, for anchor: ARAnchor, in arView: ARView) {
+
         let clonedEntity = modelEntity.clone(recursive: true)
         clonedEntity.generateCollisionShapes(recursive: true)
+
+        // Save correct scale
+        let finalScale = clonedEntity.scale
+
+        // Start hidden
+        clonedEntity.scale = .zero
+
         arView.installGestures([.rotation, .translation], for: clonedEntity)
 
-        // Bind the rendered entity to the exact ARAnchor transform from placement/reload.
         let anchorEntity = AnchorEntity(.anchor(identifier: anchor.identifier))
         anchorEntity.addChild(clonedEntity)
+
         arView.scene.addAnchor(anchorEntity)
+
+        // Animate to correct scale
+        clonedEntity.move(
+            to: Transform(scale: finalScale),
+            relativeTo: clonedEntity.parent,
+            duration: 0.2,
+            timingFunction: .easeOut
+        )
 
         self.sceneManager.anchorEntities.append(anchorEntity)
     }
