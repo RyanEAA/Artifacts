@@ -81,6 +81,7 @@ extension ARViewContainer {
             if placementSettings.previewEntity == nil {
 
                 let preview = entity.clone(recursive: true)
+                makePreviewTransparent(preview)
                 preview.generateCollisionShapes(recursive: true)
 
                 placementSettings.previewEntity = preview
@@ -144,6 +145,42 @@ extension ARViewContainer {
         }
 
         self.placePendingAnnotationIfNeeded(on: arView)
+    }
+    
+    func makePreviewTransparent(_ entity: Entity) {
+
+        if let modelEntity = entity as? ModelEntity {
+
+            var newMaterials: [Material] = []
+
+            for material in modelEntity.model?.materials ?? [] {
+
+                if var pbr = material as? PhysicallyBasedMaterial {
+
+                    pbr.blending = .transparent(opacity: .init(floatLiteral: 0.35))
+                    newMaterials.append(pbr)
+
+                } else if var simple = material as? SimpleMaterial {
+
+                    simple.color = .init(
+                        tint: simple.color.tint,
+                        texture: simple.color.texture
+                    )
+                    simple.color.tint = simple.color.tint.withAlphaComponent(0.35)
+                    newMaterials.append(simple)
+
+                } else {
+                    newMaterials.append(material)
+                }
+            }
+
+            modelEntity.model?.materials = newMaterials
+        }
+
+        // Recursively apply to children
+        for child in entity.children {
+            makePreviewTransparent(child)
+        }
     }
 
     func place(_ modelEntity: ModelEntity, for anchor: ARAnchor, in arView: ARView) {
