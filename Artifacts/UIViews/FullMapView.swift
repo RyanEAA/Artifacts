@@ -20,13 +20,24 @@ struct FullMapView: View {
     @State private var selectedClusterID: String?
     @State private var selectedArtifact: ArtifactMapItem?
 
+    private var mapRegionBinding: Binding<MKCoordinateRegion> {
+        Binding(
+            get: { region },
+            set: { newValue in
+                DispatchQueue.main.async {
+                    region = newValue
+                }
+            }
+        )
+    }
+
     private var clusters: [ArtifactCluster] {
         ArtifactMapClusterer.makeClusters(items: artifacts)
     }
 
     var body: some View {
         ZStack {
-            Map(coordinateRegion: $region, annotationItems: clusters) { cluster in
+            Map(coordinateRegion: mapRegionBinding, annotationItems: clusters) { cluster in
                 MapAnnotation(coordinate: cluster.coordinate) {
                     ArtifactMarkerView(
                         owners: markerOwners(for: cluster),

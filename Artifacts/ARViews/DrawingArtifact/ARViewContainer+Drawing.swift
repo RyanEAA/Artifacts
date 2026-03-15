@@ -228,17 +228,13 @@ extension ARViewContainer {
             do {
                 let strokes = try await ArtifactsService.shared.fetchVisibleDrawingArtifacts(sceneId: sceneId)
                 await MainActor.run {
-                    var remainingPointBudget = 1800
                     for stroke in strokes {
                         guard !stroke.points.isEmpty else { continue }
-                        if remainingPointBudget <= 0 { break }
-
                         let step = max(1, stroke.points.count / 240)
                         let sampled = stride(from: 0, to: stroke.points.count, by: step)
                             .map { stroke.points[$0] }
-                        let pointsToRender = Array(sampled.prefix(remainingPointBudget))
+                        let pointsToRender = sampled
                         guard !pointsToRender.isEmpty else { continue }
-                        remainingPointBudget -= pointsToRender.count
 
                         let color = UIColor(
                             red: CGFloat(stroke.colorRGBA.x),
@@ -277,6 +273,7 @@ extension ARViewContainer {
                                 on: arView
                             )
                         }
+                        self.sceneManager.markRestoredDrawingIfAwaiting()
                     }
                 }
             } catch {
@@ -287,29 +284,30 @@ extension ARViewContainer {
 
     func restoreDrawingsAfterRelocalization(sceneId: String, in arView: ARView, maxWaitSeconds: TimeInterval = 10) {
         guard !sceneId.isEmpty else { return }
-        let started = Date()
 
-        func attempt() {
-            let elapsed = Date().timeIntervalSince(started)
-            let timedOut = elapsed >= maxWaitSeconds
+        let deadline = Date().addingTimeInterval(maxWaitSeconds)
 
-            if self.sceneManager.isAwaitingVisibleArtifactsAfterLoad, !timedOut {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    attempt()
-                }
+        func attemptDrawingRestore() {
+            if self.sceneManager.areModelAndAnnotationRestoresSatisfied() || Date() >= deadline {
+                self.restoreDrawingsFromCloud(sceneId: sceneId, in: arView)
                 return
             }
 
-            if self.sceneManager.isAwaitingVisibleArtifactsAfterLoad && timedOut {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                attemptDrawingRestore()
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + maxWaitSeconds) {
+            if self.sceneManager.isAwaitingVisibleArtifactsAfterLoad {
                 // Fallback: when world-map relocalization doesn't re-add anchors in time,
                 // restore models/annotations directly from artifact transforms.
                 self.restoreVisibleModelsAndAnnotationsFromCloud(sceneId: sceneId, in: arView)
             }
-            self.restoreDrawingsFromCloud(sceneId: sceneId, in: arView)
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            attempt()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+            attemptDrawingRestore()
         }
     }
 }
@@ -398,6 +396,21 @@ extension ARViewContainer.Coordinator {
         ) { [weak self] _ in
             self?.parent.clearAllDrawings(in: arView)
         }
-        notificationObservers.append(contentsOf: [undo, clear])
+        let deleteArtifact = NotificationCenter.default.addObserver(
+            forName: .artifactDeleted,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self else { return }
+            guard let artifactId = notification.object as? String else { return }
+            if self.parent.sceneManager.drawingManager.removeStroke(artifactId: artifactId, in: arView.scene) {
+                self.parent.sceneManager.artifactOwnerBadgeViews[artifactId]?.removeFromSuperview()
+                self.parent.sceneManager.artifactOwnerBadgeViews[artifactId] = nil
+                self.parent.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = nil
+                self.parent.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = nil
+                self.parent.sceneManager.artifactOwnerBadgeOwnerUids[artifactId] = nil
+            }
+        }
+        notificationObservers.append(contentsOf: [undo, clear, deleteArtifact])
     }
 }

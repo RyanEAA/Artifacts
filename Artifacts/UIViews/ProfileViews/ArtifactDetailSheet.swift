@@ -18,7 +18,8 @@ struct ArtifactDetailSheet: View {
                     Circle()
                         .fill(Color("MintGreen").opacity(0.16))
                         .frame(width: 38, height: 38)
-                    Image(systemName: "mappin.and.ellipse")
+                    Image(systemName: item.systemImageName)
+                        .symbolRenderingMode(.hierarchical)
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(Color("MintGreen").opacity(0.92))
                 }
@@ -27,7 +28,7 @@ struct ArtifactDetailSheet: View {
                     Text(item.title)
                         .font(.custom("Poppins-Bold", size: 18))
                         .foregroundColor(Color.white.opacity(0.92))
-                    Text("Scene \(item.sceneId.isEmpty ? "unknown" : item.sceneId)")
+                    Text("\(item.artifactTypeLabel) • \(item.createdAt.formatted(date: .abbreviated, time: .shortened))")
                         .font(.custom("Poppins-Regular", size: 12))
                         .foregroundColor(Color.white.opacity(0.60))
                         .lineLimit(1)
@@ -37,8 +38,8 @@ struct ArtifactDetailSheet: View {
             }
 
             VStack(spacing: 8) {
-                row("Latitude", String(format: "%.5f", item.coordinate.latitude))
-                row("Longitude", String(format: "%.5f", item.coordinate.longitude))
+                row("Approximate location", item.readableCoordinate)
+                row("Scene", item.sceneId.isEmpty ? "Unknown" : item.sceneId)
             }
             .padding(12)
             .background(Color.white.opacity(0.06))

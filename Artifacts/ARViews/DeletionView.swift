@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import RealityKit
 
 struct DeletionView: View {
     @EnvironmentObject var sceneManager: SceneManager
@@ -23,7 +24,11 @@ struct DeletionView: View {
             DeleteActionButton(kind: .delete) {
                 print("Confirm Deletion button Pressed")
 
-                guard let anchor = self.modelDeletionManager.entitySelectedForDeletion?.anchor else { return }
+                guard let entity = self.modelDeletionManager.entitySelectedForDeletion,
+                      let anchor = entity.anchor else { return }
+                let modelName = anchor.name.hasPrefix(anchorNamePrefix)
+                    ? String(anchor.name.dropFirst(anchorNamePrefix.count))
+                    : entity.name
 
                 let anchoringIdentifier = anchor.anchorIdentifier
                 if let index = self.sceneManager.anchorEntities.firstIndex(where: { $0.anchorIdentifier == anchoringIdentifier }) {
@@ -32,6 +37,16 @@ struct DeletionView: View {
 
                 anchor.removeFromParent()
                 self.modelDeletionManager.entitySelectedForDeletion = nil
+
+                if let sceneId = self.sceneManager.selectedCloudSceneId, !sceneId.isEmpty {
+                    Task {
+                        try? await ArtifactsService.shared.deleteMyDraftModelArtifact(
+                            sceneId: sceneId,
+                            modelName: modelName,
+                            transform: anchor.transformMatrix(relativeTo: nil)
+                        )
+                    }
+                }
             }
         }
         .padding(.horizontal, 18)

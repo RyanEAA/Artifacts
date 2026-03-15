@@ -14,6 +14,7 @@ final class NotificationService {
     private var uid: String?
 
     private var friendLinksListener: ListenerRegistration?
+    private var pendingFriendRequestsListener: ListenerRegistration?
     private var chatsListener: ListenerRegistration?
     private var messageListenersByThread: [String: ListenerRegistration] = [:]
     private var sceneListeners: [ListenerRegistration] = []
@@ -22,6 +23,8 @@ final class NotificationService {
     private var areScenesPrimedByChunk: [Int: Bool] = [:]
     private var seenMessageEventKeys: Set<String> = []
     private var seenSceneEventKeys: Set<String> = []
+    private var seenFriendRequestEventKeys: Set<String> = []
+    private var isPendingFriendRequestsPrimed = false
     private var usernameCache: [String: String] = [:]
 
     private init() {}
@@ -33,11 +36,14 @@ final class NotificationService {
         requestAuthorizationIfNeeded()
         attachChatsListener(for: uid)
         attachFriendLinksListener(for: uid)
+        attachPendingFriendRequestsListener(for: uid)
     }
 
     func stop() {
         friendLinksListener?.remove()
         friendLinksListener = nil
+        pendingFriendRequestsListener?.remove()
+        pendingFriendRequestsListener = nil
         chatsListener?.remove()
         chatsListener = nil
         messageListenersByThread.values.forEach { $0.remove() }
@@ -48,6 +54,8 @@ final class NotificationService {
         primedMessageThreads.removeAll()
         seenMessageEventKeys.removeAll()
         seenSceneEventKeys.removeAll()
+        seenFriendRequestEventKeys.removeAll()
+        isPendingFriendRequestsPrimed = false
         uid = nil
     }
 
@@ -140,6 +148,44 @@ final class NotificationService {
                 }
 
                 self.attachSceneListeners(for: Array(Set(friendUIDs)).sorted())
+            }
+    }
+
+    private func attachPendingFriendRequestsListener(for uid: String) {
+        pendingFriendRequestsListener = db.collection("friendLinks")
+            .whereField("participants", arrayContains: uid)
+            .whereField("recipientUid", isEqualTo: uid)
+            .whereField("status", isEqualTo: "pending")
+            .addSnapshotListener { [weak self] snap, err in
+                guard let self else { return }
+                guard err == nil, let snap else { return }
+
+                let isInitial = !self.isPendingFriendRequestsPrimed
+                if isInitial { self.isPendingFriendRequestsPrimed = true }
+
+                for change in snap.documentChanges where change.type == .added {
+                    let data = change.document.data()
+                    let requesterUid = data["requesterUid"] as? String ?? ""
+                    guard !requesterUid.isEmpty else { continue }
+
+                    let ts = (data["createdAt"] as? Timestamp)?.dateValue()
+                        ?? (data["updatedAt"] as? Timestamp)?.dateValue()
+                        ?? Date()
+                    let eventKey = "friend-request:\(change.document.documentID):\(Int(ts.timeIntervalSince1970))"
+
+                    if self.seenFriendRequestEventKeys.contains(eventKey) { continue }
+                    self.seenFriendRequestEventKeys.insert(eventKey)
+                    if isInitial { continue }
+
+                    Task {
+                        let requesterUsername = await self.fetchUsername(uid: requesterUid) ?? "friend"
+                        self.postLocalNotification(
+                            id: eventKey,
+                            title: "@\(requesterUsername)",
+                            body: "sent you a friend request."
+                        )
+                    }
+                }
             }
     }
 

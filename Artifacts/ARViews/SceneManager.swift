@@ -73,6 +73,11 @@ class SceneManager: ObservableObject {
     var fallbackArtifactAnchorEntity: AnchorEntity? = nil
     var fallbackRestoredModelArtifactIds: Set<String> = []
     var fallbackRestoredAnnotationArtifactIds: Set<String> = []
+    var loadVisibleModelRecords: [ModelArtifactRecord] = []
+    var loadVisibleAnnotationArtifactIDs: Set<String> = []
+    var isLoadArtifactFilterActive: Bool = false
+    var modelAnchorEntitiesByArtifactId: [String: AnchorEntity] = [:]
+    var fallbackModelEntitiesByArtifactId: [String: Entity] = [:]
 
     // Firestore override cache for the currently loading scene.
     // Key is artifactId (UUID string), value is annotationText.
@@ -87,8 +92,10 @@ class SceneManager: ObservableObject {
     private var loadVisibilityTimeoutWorkItem: DispatchWorkItem?
     private var expectedRestoredModelCount: Int = 0
     private var expectedRestoredAnnotationCount: Int = 0
+    private var expectedRestoredDrawingCount: Int = 0
     private var restoredModelCount: Int = 0
     private var restoredAnnotationCount: Int = 0
+    private var restoredDrawingCount: Int = 0
 
     func requestAddAnnotation(text: String) {
         pendingAnnotationText = text
@@ -98,6 +105,12 @@ class SceneManager: ObservableObject {
         annotationTextListener?.remove()
         annotationTextListener = nil
         annotationTextListenerSceneId = nil
+    }
+
+    func resetLoadArtifactFilters() {
+        loadVisibleModelRecords = []
+        loadVisibleAnnotationArtifactIDs = []
+        isLoadArtifactFilterActive = false
     }
 
     func beginPersistenceProgress(_ text: String) {
@@ -133,7 +146,7 @@ class SceneManager: ObservableObject {
         }
     }
 
-    func beginAwaitingVisibleArtifactsAfterLoad(expectedModels: Int, expectedAnnotations: Int) {
+    func beginAwaitingVisibleArtifactsAfterLoad(expectedModels: Int, expectedAnnotations: Int, expectedDrawings: Int) {
         DispatchQueue.main.async {
             self.loadVisibilityTimeoutWorkItem?.cancel()
             self.isAwaitingVisibleArtifactsAfterLoad = true
@@ -141,10 +154,12 @@ class SceneManager: ObservableObject {
             self.persistenceProgressText = "Relocalizing scene..."
             self.expectedRestoredModelCount = max(0, expectedModels)
             self.expectedRestoredAnnotationCount = max(0, expectedAnnotations)
+            self.expectedRestoredDrawingCount = max(0, expectedDrawings)
             self.restoredModelCount = 0
             self.restoredAnnotationCount = 0
+            self.restoredDrawingCount = 0
 
-            if self.expectedRestoredModelCount + self.expectedRestoredAnnotationCount == 0 {
+            if self.expectedRestoredModelCount + self.expectedRestoredAnnotationCount + self.expectedRestoredDrawingCount == 0 {
                 self.isAwaitingVisibleArtifactsAfterLoad = false
                 self.endPersistenceProgress()
                 self.postPersistenceNotice("Scene loaded (no artifacts in this map).", style: .info)
@@ -158,6 +173,7 @@ class SceneManager: ObservableObject {
             self.loadVisibilityTimeoutWorkItem?.cancel()
             self.loadVisibilityTimeoutWorkItem = nil
             self.isAwaitingVisibleArtifactsAfterLoad = false
+            self.resetLoadArtifactFilters()
             self.endPersistenceProgress()
             self.postPersistenceNotice("Scene loaded and artifacts restored.", style: .success)
         }
@@ -169,6 +185,7 @@ class SceneManager: ObservableObject {
             let workItem = DispatchWorkItem { [weak self] in
                 guard let self = self, self.isAwaitingVisibleArtifactsAfterLoad else { return }
                 self.isAwaitingVisibleArtifactsAfterLoad = false
+                self.resetLoadArtifactFilters()
                 self.endPersistenceProgress()
                 self.postPersistenceNotice(
                     "Scene map loaded. Move your device to relocalize artifacts.",
@@ -196,15 +213,30 @@ class SceneManager: ObservableObject {
         }
     }
 
+    func markRestoredDrawingIfAwaiting() {
+        DispatchQueue.main.async {
+            guard self.isAwaitingVisibleArtifactsAfterLoad else { return }
+            self.restoredDrawingCount += 1
+            self.evaluateAwaitingLoadCompletion()
+        }
+    }
+
     private func evaluateAwaitingLoadCompletion() {
         guard self.isAwaitingVisibleArtifactsAfterLoad else { return }
 
         let modelsDone = self.restoredModelCount >= self.expectedRestoredModelCount
         let annotationsDone = self.restoredAnnotationCount >= self.expectedRestoredAnnotationCount
+        let drawingsDone = self.restoredDrawingCount >= self.expectedRestoredDrawingCount
 
-        if modelsDone && annotationsDone {
+        if modelsDone && annotationsDone && drawingsDone {
             self.completeAwaitingVisibleArtifactsAfterLoadIfNeeded()
         }
+    }
+
+    func areModelAndAnnotationRestoresSatisfied() -> Bool {
+        let modelsDone = self.restoredModelCount >= self.expectedRestoredModelCount
+        let annotationsDone = self.restoredAnnotationCount >= self.expectedRestoredAnnotationCount
+        return modelsDone && annotationsDone
     }
 }
 

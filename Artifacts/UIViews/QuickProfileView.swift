@@ -26,6 +26,7 @@ struct QuickProfileView: View {
 
     @State private var artifacts: [ArtifactMapItem] = []
     @State private var artifactsListener: ListenerRegistration?
+    @State private var hasResolvedArtifactsOnce = false
 
     @State private var showFriends = false
     @State private var showFullMap = false
@@ -33,6 +34,7 @@ struct QuickProfileView: View {
     @State private var selectedArtifact: ArtifactMapItem?
     @State private var selectedClusterID: String?
     @State private var didAutoCenter = false
+    @State private var artifactListenerOwnerUIDs: Set<String> = []
 
     @State private var showArtifactManager = false
 
@@ -59,8 +61,22 @@ struct QuickProfileView: View {
     }
 
     private var hasArtifacts: Bool { !artifacts.isEmpty }
+    private var myArtifacts: [ArtifactMapItem] {
+        guard let uid = currentUID else { return [] }
+        return artifacts.filter { $0.ownerUid == uid }
+    }
     private var clusters: [ArtifactCluster] {
         ArtifactMapClusterer.makeClusters(items: artifacts)
+    }
+    private var mapRegionBinding: Binding<MKCoordinateRegion> {
+        Binding(
+            get: { region },
+            set: { newValue in
+                DispatchQueue.main.async {
+                    region = newValue
+                }
+            }
+        )
     }
     private var currentUID: String? {
         Auth.auth().currentUser?.uid
@@ -111,8 +127,9 @@ struct QuickProfileView: View {
                 .ignoresSafeArea()
         }
         .sheet(isPresented: $showArtifactManager){
-            MyArtifactsView(artifacts: artifacts)
-                .presentationDetents([.medium, .large])
+            MyArtifactsView(artifacts: myArtifacts)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         .onChange(of: selectedProfileImage) { newImage in
             guard let newImage else { return }
@@ -168,20 +185,13 @@ struct QuickProfileView: View {
                             .frame(width: 54, height: 54)
                             .clipShape(Circle())
                     } else if let urlString = profileImageURL, let url = URL(string: urlString) {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .empty:
-                                ProgressView()
-                                    .tint(Color("MintGreen"))
-                            case .success(let image):
-                                image
-                                    .resizable()
-                                    .scaledToFill()
-                            default:
-                                Image(systemName: "person.fill")
-                                    .font(.system(size: 22, weight: .bold))
-                                    .foregroundColor(Color("MintGreen").opacity(0.92))
-                            }
+                        CachedRemoteImage(url: url) { image in
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        } placeholder: {
+                            ProgressView()
+                                .tint(Color("MintGreen"))
                         }
                         .frame(width: 54, height: 54)
                         .clipShape(Circle())
@@ -242,7 +252,7 @@ struct QuickProfileView: View {
             Button {
                 showArtifactManager = true
             } label: {
-                StatChip(title: "Artifacts", value: "\(artifacts.count)", icon: "mappin.and.ellipse")
+                StatChip(title: "Artifacts", value: "\(myArtifactCount)", icon: "mappin.and.ellipse")
             }
             .buttonStyle(.plain)        }
     }
@@ -271,7 +281,7 @@ struct QuickProfileView: View {
             }
 
             ZStack(alignment: .bottomLeading) {
-                Map(coordinateRegion: $region, annotationItems: clusters) { cluster in
+                Map(coordinateRegion: mapRegionBinding, annotationItems: clusters) { cluster in
                     MapAnnotation(coordinate: cluster.coordinate) {
                         ArtifactMarkerView(
                             owners: markerOwners(for: cluster),
@@ -301,7 +311,7 @@ struct QuickProfileView: View {
                         .stroke(Color.white.opacity(0.10), lineWidth: 1)
                 )
 
-                if !hasArtifacts {
+                if hasResolvedArtifactsOnce && !hasArtifacts {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("No published artifacts yet")
                             .font(.custom("Poppins-Bold", size: 14))
@@ -373,18 +383,30 @@ struct QuickProfileView: View {
         do {
             friendsListener = try friendsService.listenFriendUIDs { uids in
                 Task {
+                    let normalizedUIDs = Set(uids)
                     await MainActor.run {
-                        self.friendCount = uids.count
-                        self.friendUIDs = uids
-                        self.refreshArtifactsListener()
+                        self.friendCount = normalizedUIDs.count
+                        if normalizedUIDs != Set(self.friendUIDs) {
+                            self.friendUIDs = normalizedUIDs.sorted()
+                            self.refreshArtifactsListener()
+                        }
                     }
 
                     let users = try? await friendsService.fetchUsernames(for: uids)
                     let names = (users ?? [])
                         .map { $0.username }
                         .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+                    let avatarMap: [String: String] = Dictionary(
+                        uniqueKeysWithValues: (users ?? []).compactMap { user in
+                            guard let url = user.profilePictureURL, !url.isEmpty else { return nil }
+                            return (user.id, url)
+                        }
+                    )
 
-                    await MainActor.run { self.friends = names }
+                    await MainActor.run {
+                        self.friends = names
+                        self.ownerAvatarURLs.merge(avatarMap) { _, new in new }
+                    }
                 }
             }
         } catch {
@@ -407,6 +429,8 @@ struct QuickProfileView: View {
         friends = []
         friendUIDs = []
         artifacts = []
+        hasResolvedArtifactsOnce = false
+        artifactListenerOwnerUIDs = []
         ownerAvatarURLs = [:]
         activeArtifactOwnerUIDs = []
 
@@ -417,9 +441,14 @@ struct QuickProfileView: View {
     }
 
     private func refreshArtifactsListener() {
+        let nextOwnerUIDs = Set(friendUIDs)
+        guard nextOwnerUIDs != artifactListenerOwnerUIDs || artifactsListener == nil else { return }
+        artifactListenerOwnerUIDs = nextOwnerUIDs
         artifactsListener?.remove()
         artifactsListener = artifactsService.listenMyAndFriendsPublishedArtifacts(friendUIDs: friendUIDs) { items in
             Task { @MainActor in
+                self.hasResolvedArtifactsOnce = true
+                guard self.artifacts != items else { return }
                 self.artifacts = items
                 let ownerUIDSet = Set(items.map(\.ownerUid))
                 if ownerUIDSet != self.activeArtifactOwnerUIDs {
@@ -439,7 +468,15 @@ struct QuickProfileView: View {
 
     private func updateOwnerAvatarURLs(for ownerUIDs: [String]) async {
         guard !ownerUIDs.isEmpty else {
-            await MainActor.run { ownerAvatarURLs = [:] }
+            await MainActor.run {
+                if let myUid = Auth.auth().currentUser?.uid,
+                   let profileImageURL,
+                   !profileImageURL.isEmpty {
+                    ownerAvatarURLs = [myUid: profileImageURL]
+                } else {
+                    ownerAvatarURLs = [:]
+                }
+            }
             return
         }
 
@@ -459,7 +496,7 @@ struct QuickProfileView: View {
             }
 
             await MainActor.run {
-                ownerAvatarURLs = merged
+                ownerAvatarURLs.merge(merged) { _, new in new }
             }
         } catch {
             print("⚠️ updateOwnerAvatarURLs failed:", error.localizedDescription)

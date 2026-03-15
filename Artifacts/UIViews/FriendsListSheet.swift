@@ -39,6 +39,9 @@ struct FriendsListSheet: View {
     @State private var selectedChatFriend: FriendUser?
 
     private var myUid: String? { session.user?.uid }
+    private var hiddenSuggestionIDs: Set<String> {
+        Self.loadHiddenSuggestionIDs(for: myUid)
+    }
 
     private var trimmedSearch: String {
         search.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -78,7 +81,7 @@ struct FriendsListSheet: View {
                                             leadingImageURL: r.profilePictureURL,
                                             leadingSystemImage: "person.fill",
                                             primaryTitle: "Confirm",
-                                            secondaryTitle: "Delete",
+                                            secondaryTitle: "Reject",
                                             primaryStyle: .primary,
                                             secondaryStyle: .danger,
                                             isPrimaryDisabled: false,
@@ -112,7 +115,7 @@ struct FriendsListSheet: View {
                                                 primaryTitle: "Message",
                                                 secondaryTitle: "Remove",
                                                 primaryStyle: .primary,
-                                                secondaryStyle: .secondary,
+                                                secondaryStyle: .danger,
                                                 isPrimaryDisabled: false,
                                                 onPrimary: { selectedChatFriend = u },
                                                 onSecondary: { removeFriend(friendUid: u.id) }
@@ -141,7 +144,7 @@ struct FriendsListSheet: View {
                                                 primaryTitle: "Message",
                                                 secondaryTitle: "Remove",
                                                 primaryStyle: .primary,
-                                                secondaryStyle: .secondary,
+                                                secondaryStyle: .danger,
                                                 isPrimaryDisabled: false,
                                                 onPrimary: { selectedChatFriend = u },
                                                 onSecondary: { removeFriend(friendUid: u.id) }
@@ -181,6 +184,7 @@ struct FriendsListSheet: View {
                                                     if isPending {
                                                         unsend(userId: u.id)
                                                     } else {
+                                                        hideSuggestion(userId: u.id)
                                                         withAnimation(.easeInOut(duration: 0.20)) {
                                                             suggestions.removeAll { $0.id == u.id }
                                                         }
@@ -381,7 +385,7 @@ struct FriendsListSheet: View {
         let results = (try? await friendsService.searchUsernames(prefix: prefix, limit: 25)) ?? []
 
         let filtered = results
-            .filter { $0.id != me && !existing.contains($0.id) }
+            .filter { $0.id != me && !existing.contains($0.id) && !hiddenSuggestionIDs.contains($0.id) }
             .sorted { $0.username.lowercased() < $1.username.lowercased() }
 
         self.suggestions = filtered
@@ -420,6 +424,22 @@ struct FriendsListSheet: View {
             do { try await friendsService.removeLink(with: friendUid) }
             catch { print("removeFriend error:", error) }
         }
+    }
+
+    private func hideSuggestion(userId: String) {
+        guard let myUid else { return }
+        var hidden = Self.loadHiddenSuggestionIDs(for: myUid)
+        hidden.insert(userId)
+        UserDefaults.standard.set(Array(hidden), forKey: Self.hiddenSuggestionsDefaultsKey(for: myUid))
+    }
+
+    private static func hiddenSuggestionsDefaultsKey(for uid: String?) -> String {
+        "hidden_friend_suggestions_\(uid ?? "anonymous")"
+    }
+
+    private static func loadHiddenSuggestionIDs(for uid: String?) -> Set<String> {
+        let key = hiddenSuggestionsDefaultsKey(for: uid)
+        return Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
     }
 }
 
@@ -692,7 +712,7 @@ private struct ActionCapsuleButton: View {
                 .font(.custom("Poppins-SemiBold", size: 13))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
-                .frame(minWidth: 92)
+                .frame(minWidth: 72)
                 .padding(.vertical, 8)
                 .padding(.horizontal, 12)
                 .foregroundColor(foreground)

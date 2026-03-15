@@ -59,6 +59,10 @@ extension ARViewContainer {
                 if let name = anchor.name, name.hasPrefix(annotationNamePrefix) {
                     let base64 = String(name.dropFirst(annotationNamePrefix.count))
                     if var data = parent.decodeAnnotation(from: base64) {
+                        if parent.sceneManager.isLoadArtifactFilterActive,
+                           !parent.sceneManager.loadVisibleAnnotationArtifactIDs.contains(data.id.uuidString) {
+                            continue
+                        }
                         if let override = parent.sceneManager.annotationTextOverrides[data.id.uuidString] {
                             data.text = override
                         }
@@ -82,22 +86,13 @@ extension ARViewContainer {
                 if let anchorName = anchor.name, anchorName.hasPrefix(anchorNamePrefix) {
                     let modelName = anchorName.dropFirst(anchorNamePrefix.count)
                     print("ARSession: didAdd anchor for modelName: \(modelName)")
-                    let ownerUid = parent.sceneManager.selectedSceneOwnerUid ?? Auth.auth().currentUser?.uid ?? ""
-                    if !ownerUid.isEmpty {
-                        let pos = SIMD3<Float>(
-                            anchor.transform.columns.3.x,
-                            anchor.transform.columns.3.y,
-                            anchor.transform.columns.3.z
-                        )
-                        parent.upsertArtifactOwnerBadge(
-                            artifactId: "model-anchor-\(anchor.identifier.uuidString)",
-                            ownerUid: ownerUid,
-                            worldPosition: pos,
-                            yOffset: -40,
-                            on: arView
-                        )
+                    let matchedRecord = self.parent.consumeMatchingVisibleModelRecord(
+                        modelName: String(modelName),
+                        transform: anchor.transform
+                    )
+                    if self.parent.sceneManager.isLoadArtifactFilterActive, matchedRecord == nil {
+                        continue
                     }
-
                     guard let model = parent.modelsViewModel.models
                         .first(where: { $0.name == modelName }) else {
                         print("Unable to retrieve model from modelsViewModel")
@@ -108,14 +103,24 @@ extension ARViewContainer {
                         model.asyncLoadModelEntity { [weak self] completed, _ in
                             guard let self = self else { return }
                             if completed {
-                                let modelAnchor = ModelAnchor(model: model, anchor: anchor)
+                                let modelAnchor = ModelAnchor(
+                                    model: model,
+                                    anchor: anchor,
+                                    artifactId: matchedRecord?.artifactId,
+                                    ownerUid: matchedRecord?.ownerUid
+                                )
                                 self.parent.placementSettings.modelsConfirmedForPlacement
                                     .append(modelAnchor)
                                 print("Adding modelAnchor with name: \(model.name)")
                             }
                         }
                     } else {
-                        let modelAnchor = ModelAnchor(model: model, anchor: anchor)
+                        let modelAnchor = ModelAnchor(
+                            model: model,
+                            anchor: anchor,
+                            artifactId: matchedRecord?.artifactId,
+                            ownerUid: matchedRecord?.ownerUid
+                        )
                         self.parent.placementSettings.modelsConfirmedForPlacement
                             .append(modelAnchor)
                     }
@@ -261,6 +266,59 @@ extension ARViewContainer {
                     parent.hideDeleteButton(for: id)
                 }
             }
+        }
+
+        func subscribeToArtifactDeletionNotifications(arView: ARView) {
+            let delete = NotificationCenter.default.addObserver(
+                forName: .artifactDeleted,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self = self else { return }
+                guard let artifactId = notification.object as? String else { return }
+
+                if let anchorEntity = self.parent.sceneManager.modelAnchorEntitiesByArtifactId[artifactId] {
+                    if let anchors = arView.session.currentFrame?.anchors,
+                       let sessionAnchor = anchors.first(where: { $0.identifier == anchorEntity.anchorIdentifier }) {
+                        arView.session.remove(anchor: sessionAnchor)
+                    }
+                    anchorEntity.removeFromParent()
+                    self.parent.sceneManager.anchorEntities.removeAll { $0 === anchorEntity }
+                    self.parent.sceneManager.modelAnchorEntitiesByArtifactId[artifactId] = nil
+                }
+
+                if let fallbackEntity = self.parent.sceneManager.fallbackModelEntitiesByArtifactId[artifactId] {
+                    fallbackEntity.removeFromParent()
+                    self.parent.sceneManager.fallbackModelEntitiesByArtifactId[artifactId] = nil
+                    self.parent.sceneManager.fallbackRestoredModelArtifactIds.remove(artifactId)
+                }
+
+                if let id = UUID(uuidString: artifactId) {
+                    if let view = self.parent.sceneManager.annotationViews[id] {
+                        view.removeFromSuperview()
+                    }
+                    if let button = self.parent.sceneManager.deleteButtons[id] {
+                        button.removeFromSuperview()
+                    }
+                    if let anchor = self.parent.sceneManager.annotationAnchors[id] {
+                        arView.session.remove(anchor: anchor)
+                    }
+                    self.parent.sceneManager.annotationViews[id] = nil
+                    self.parent.sceneManager.deleteButtons[id] = nil
+                    self.parent.sceneManager.annotationAnchors[id] = nil
+                    self.parent.sceneManager.isEditing[id] = nil
+                    self.parent.sceneManager.hasBeenTapped[id] = nil
+                    self.parent.sceneManager.fallbackRestoredAnnotationArtifactIds.remove(artifactId)
+                }
+
+                self.parent.sceneManager.artifactOwnerBadgeViews[artifactId]?.removeFromSuperview()
+                self.parent.sceneManager.artifactOwnerBadgeViews[artifactId] = nil
+                self.parent.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = nil
+                self.parent.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = nil
+                self.parent.sceneManager.artifactOwnerBadgeOwnerUids[artifactId] = nil
+            }
+
+            notificationObservers.append(delete)
         }
     }
 }

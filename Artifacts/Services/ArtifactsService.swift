@@ -9,9 +9,14 @@ import FirebaseAuth
 import CoreLocation
 import simd
 
+extension Notification.Name {
+    static let artifactDeleted = Notification.Name("Artifacts.ArtifactDeleted")
+}
+
 struct ArtifactMapItem: Identifiable, Equatable {
     let id: String
     let title: String
+    let type: String
     let ownerUid: String
     let sceneId: String
     let coordinate: CLLocationCoordinate2D
@@ -321,6 +326,8 @@ final class ArtifactsService {
 
         var out: [String: String] = [:]
         for doc in snap.documents {
+            let published = doc.data()["published"] as? Bool
+            guard published != false else { continue }
             let text = (doc.data()["annotationText"] as? String) ?? ""
             out[doc.documentID] = text
         }
@@ -409,6 +416,8 @@ final class ArtifactsService {
 
                         var out: [String: String] = [:]
                         for doc in snap?.documents ?? [] {
+                            let published = doc.data()["published"] as? Bool
+                            guard published != false else { continue }
                             let text = (doc.data()["annotationText"] as? String) ?? ""
                             out[doc.documentID] = text
                         }
@@ -516,6 +525,49 @@ final class ArtifactsService {
             .collection("artifacts")
             .document(artifactId)
             .delete()
+        NotificationCenter.default.post(name: .artifactDeleted, object: artifactId)
+    }
+
+    func deleteMyDraftArtifacts(sceneId: String) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard !sceneId.isEmpty else { return }
+
+        let snap = try await db.collection("artifacts")
+            .whereField("ownerUid", isEqualTo: uid)
+            .whereField("sceneId", isEqualTo: sceneId)
+            .whereField("published", isEqualTo: false)
+            .getDocuments()
+
+        guard !snap.documents.isEmpty else { return }
+        let batch = db.batch()
+        for doc in snap.documents {
+            batch.deleteDocument(doc.reference)
+        }
+        try await batch.commit()
+    }
+
+    func deleteMyDraftModelArtifact(sceneId: String, modelName: String, transform: simd_float4x4) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard !sceneId.isEmpty else { return }
+
+        let snap = try await db.collection("artifacts")
+            .whereField("ownerUid", isEqualTo: uid)
+            .whereField("sceneId", isEqualTo: sceneId)
+            .whereField("type", isEqualTo: "model")
+            .whereField("published", isEqualTo: false)
+            .getDocuments()
+
+        let target = SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
+        for doc in snap.documents {
+            let data = doc.data()
+            guard (data["modelName"] as? String) == modelName else { continue }
+            guard let candidate = Self.transformMatrix(from: data["transform"]) else { continue }
+            let point = SIMD3<Float>(candidate.columns.3.x, candidate.columns.3.y, candidate.columns.3.z)
+            guard simd_distance(target, point) < 0.06 else { continue }
+            try await doc.reference.delete()
+            NotificationCenter.default.post(name: .artifactDeleted, object: doc.documentID)
+            break
+        }
     }
 
     func createDrawingArtifact(
@@ -585,6 +637,8 @@ final class ArtifactsService {
 
         let records: [DrawingArtifactRecord] = snap.documents.compactMap { doc in
             let data = doc.data()
+            let published = data["published"] as? Bool
+            guard published != false else { return nil }
             let pointMaps = data["drawingPoints"] as? [[String: Double]] ?? []
             let points: [SIMD3<Float>] = pointMaps.compactMap { p in
                 guard let x = p["x"], let y = p["y"], let z = p["z"] else { return nil }
@@ -658,6 +712,29 @@ final class ArtifactsService {
         return records
     }
 
+    func fetchVisibleDrawingArtifactCount(sceneId: String) async throws -> Int {
+        guard let me = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "ArtifactsService", code: 401, userInfo: [
+                NSLocalizedDescriptionKey: "User is not authenticated"
+            ])
+        }
+        guard !sceneId.isEmpty else { return 0 }
+
+        let ownerUid = try await sceneOwnerUid(for: sceneId) ?? me
+        let snap = try await db.collection("artifacts")
+            .whereField("ownerUid", isEqualTo: ownerUid)
+            .whereField("sceneId", isEqualTo: sceneId)
+            .whereField("type", isEqualTo: "drawing")
+            .getDocuments()
+
+        return snap.documents.reduce(into: 0) { count, doc in
+            let published = doc.data()["published"] as? Bool
+            if published != false {
+                count += 1
+            }
+        }
+    }
+
     func fetchVisibleModelArtifacts(sceneId: String) async throws -> [ModelArtifactRecord] {
         guard let me = Auth.auth().currentUser?.uid else {
             throw NSError(domain: "ArtifactsService", code: 401, userInfo: [
@@ -675,6 +752,8 @@ final class ArtifactsService {
 
         return snap.documents.compactMap { doc in
             let data = doc.data()
+            let published = data["published"] as? Bool
+            guard published != false else { return nil }
             guard let modelName = data["modelName"] as? String, !modelName.isEmpty else { return nil }
             guard let transform = Self.transformMatrix(from: data["transform"]) else { return nil }
             return ModelArtifactRecord(
@@ -703,6 +782,8 @@ final class ArtifactsService {
 
         return snap.documents.compactMap { doc in
             let data = doc.data()
+            let published = data["published"] as? Bool
+            guard published != false else { return nil }
             let text = (data["annotationText"] as? String) ?? ""
             guard let transform = Self.transformMatrix(from: data["transform"]) else { return nil }
             return AnnotationArtifactRecord(
@@ -736,11 +817,21 @@ final class ArtifactsService {
     private static func decodeArtifact(docId: String, data: [String: Any]) -> ArtifactMapItem? {
         let ownerUid = data["ownerUid"] as? String ?? ""
         let sceneId = data["sceneId"] as? String ?? ""
-        let title = data["title"] as? String
+        let type = (data["type"] as? String ?? "artifact").lowercased()
+
+        let rawTitle = data["title"] as? String
             ?? data["name"] as? String
             ?? data["label"] as? String
-            ?? data["modelName"] as? String
-            ?? "Artifact"
+        let annotationText = (data["annotationText"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let modelName = (data["modelName"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = displayTitle(
+            rawTitle: rawTitle,
+            type: type,
+            annotationText: annotationText,
+            modelName: modelName
+        )
 
         let createdAt = (data["createdAt"] as? Timestamp)?.dateValue()
             ?? (data["updatedAt"] as? Timestamp)?.dateValue()
@@ -750,6 +841,7 @@ final class ArtifactsService {
             return ArtifactMapItem(
                 id: docId,
                 title: title,
+                type: type,
                 ownerUid: ownerUid,
                 sceneId: sceneId,
                 coordinate: CLLocationCoordinate2D(latitude: gp.latitude, longitude: gp.longitude),
@@ -761,6 +853,7 @@ final class ArtifactsService {
             return ArtifactMapItem(
                 id: docId,
                 title: title,
+                type: type,
                 ownerUid: ownerUid,
                 sceneId: sceneId,
                 coordinate: CLLocationCoordinate2D(latitude: gp.latitude, longitude: gp.longitude),
@@ -773,6 +866,7 @@ final class ArtifactsService {
             return ArtifactMapItem(
                 id: docId,
                 title: title,
+                type: type,
                 ownerUid: ownerUid,
                 sceneId: sceneId,
                 coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
@@ -785,6 +879,7 @@ final class ArtifactsService {
             return ArtifactMapItem(
                 id: docId,
                 title: title,
+                type: type,
                 ownerUid: ownerUid,
                 sceneId: sceneId,
                 coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
@@ -793,6 +888,52 @@ final class ArtifactsService {
         }
 
         return nil
+    }
+
+    private static func displayTitle(
+        rawTitle: String?,
+        type: String,
+        annotationText: String?,
+        modelName: String?
+    ) -> String {
+        if let rawTitle {
+            let cleanedTitle = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleanedTitle.isEmpty, cleanedTitle.lowercased() != "artifact" {
+                return cleanedTitle
+            }
+        }
+
+        switch type {
+        case "model":
+            return prettifyModelName(modelName) ?? "3D Model"
+        case "annotation":
+            if let annotationText, !annotationText.isEmpty {
+                return annotationPreview(annotationText)
+            }
+            return "Note"
+        case "drawing":
+            return "Drawing"
+        default:
+            return "Artifact"
+        }
+    }
+
+    private static func prettifyModelName(_ modelName: String?) -> String? {
+        guard let modelName, !modelName.isEmpty else { return nil }
+        return modelName
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .split(separator: " ")
+            .map { part in
+                part.prefix(1).uppercased() + part.dropFirst()
+            }
+            .joined(separator: " ")
+    }
+
+    private static func annotationPreview(_ text: String) -> String {
+        let compact = text.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        if compact.count <= 28 { return compact }
+        return String(compact.prefix(28)) + "..."
     }
 
     private static func mergeAndSort(_ byChunk: [[String: ArtifactMapItem]]) -> [ArtifactMapItem] {

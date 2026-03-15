@@ -20,6 +20,8 @@ enum PlacementTool {
 struct ModelAnchor {
     var model: Model
     var anchor: ARAnchor?
+    var artifactId: String?
+    var ownerUid: String?
 }
 
 class PlacementSettings: ObservableObject {
@@ -27,6 +29,9 @@ class PlacementSettings: ObservableObject {
     /// Single source of truth for what tool is active.
     @Published var selectedTool: PlacementTool = .none
     var previewEntity: ModelEntity?
+    var previewModelName: String?
+    var lastPreviewUpdateTimestamp: CFTimeInterval = 0
+    var lastPreviewTransform: simd_float4x4?
 
     /// Convenience accessor — derived from selectedTool.
     /// Read-only; set selectedTool instead.
@@ -47,8 +52,6 @@ class PlacementSettings: ObservableObject {
     // Retains the SceneEvents.Update subscriber
     var sceneObserver: Cancellable?
 }
-
-
 
 
 

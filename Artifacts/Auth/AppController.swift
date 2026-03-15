@@ -21,7 +21,6 @@ struct AppController: App {
     @StateObject var sceneManager = SceneManager()
     @StateObject var modelsViewModel = ModelsViewModel()
     @StateObject var modelDeletionManager = ModelDeletionManager()
-    @StateObject var sessionManager = SessionManager()
     @StateObject var friendsService = FriendsService()
     @StateObject var collaborationManager = CollaborationManager()
 
@@ -40,7 +39,6 @@ struct AppController: App {
                     .environmentObject(sceneManager)
                     .environmentObject(modelsViewModel)
                     .environmentObject(modelDeletionManager)
-                    .environmentObject(sessionManager)
                     .environmentObject(friendsService)
                     .environmentObject(collaborationManager)
             } else {

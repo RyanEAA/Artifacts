@@ -131,18 +131,13 @@ struct ArtifactMarkerView: View {
     @ViewBuilder
     private func avatarBubble(urlString: String?, size: CGFloat) -> some View {
         if let urlString, let url = URL(string: urlString) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                case .empty:
-                    ProgressView()
-                        .tint(Color("MintGreen"))
-                default:
-                    fallbackAvatar
-                }
+            CachedRemoteImage(url: url) { image in
+                image
+                    .resizable()
+                    .scaledToFill()
+            } placeholder: {
+                ProgressView()
+                    .tint(Color("MintGreen"))
             }
             .frame(width: size, height: size)
             .clipShape(Circle())

@@ -11,6 +11,7 @@ import SwiftUI
 import ARKit
 import Combine
 import UIKit
+import FirebaseAuth
 
 let anchorNamePrefix = "model-"
 let annotationNamePrefix = "ann-"
@@ -43,6 +44,9 @@ struct ARViewContainer: UIViewRepresentable {
         )
         
         sceneManager.arView = arView
+        if let currentUid = Auth.auth().currentUser?.uid {
+            prefetchOwnerUsernameIfNeeded(ownerUid: currentUid)
+        }
         
         arView.session.delegate = context.coordinator
         context.coordinator.arView = arView
@@ -67,6 +71,7 @@ struct ARViewContainer: UIViewRepresentable {
 
         // Drawing: wire undo/clear notifications posted by DrawingToolbarView
         context.coordinator.subscribeToDrawingNotifications(arView: arView)
+        context.coordinator.subscribeToArtifactDeletionNotifications(arView: arView)
 
         // Update loop
         self.placementSettings.sceneObserver = arView.scene.subscribe(

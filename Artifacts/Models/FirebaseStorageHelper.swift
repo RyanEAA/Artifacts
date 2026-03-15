@@ -11,30 +11,59 @@ import FirebaseStorage
 
 class FirebaseStorageHelper {
     static private let cloudStorage = Storage.storage()
+    static private let syncQueue = DispatchQueue(label: "FirebaseStorageHelper.sync")
+    static private var inFlightDownloads: [String: [(URL) -> Void]] = [:]
     
     class func asyncDownloadToFilesystem(relativePath: String, handler: @escaping(_ fileurl: URL)-> Void){
         let docsUrl = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let fileUrl = docsUrl.appendingPathComponent(relativePath)
-        
-        // check if asset is already in the local filesystem
-        // if it is, load that asset and run
-        
+
         if FileManager.default.fileExists(atPath: fileUrl.path) {
             handler(fileUrl)
             return
         }
-        
-        // create reference to the asset
+
+        let parentDirectory = fileUrl.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(
+                at: parentDirectory,
+                withIntermediateDirectories: true,
+                attributes: nil
+            )
+        } catch {
+            print("Firebase Storage: Failed to create directory for \(relativePath): \(error.localizedDescription)")
+        }
+
+        var shouldStartDownload = false
+        syncQueue.sync {
+            if inFlightDownloads[relativePath] != nil {
+                inFlightDownloads[relativePath, default: []].append(handler)
+            } else {
+                inFlightDownloads[relativePath] = [handler]
+                shouldStartDownload = true
+            }
+        }
+
+        guard shouldStartDownload else { return }
+
         let storageRef = cloudStorage.reference(withPath: relativePath)
-        
-        // download asset to local filesystem
+
         storageRef.write(toFile: fileUrl) { url, error in
+            let handlers: [(URL) -> Void] = syncQueue.sync {
+                defer { inFlightDownloads[relativePath] = nil }
+                return inFlightDownloads[relativePath] ?? []
+            }
+
             guard let localUrl = url else {
-                print("Firebase Storage: Error Downloading file with relative Path: \(relativePath)")
+                if let error {
+                    print("Firebase Storage: Error downloading \(relativePath): \(error.localizedDescription)")
+                } else {
+                    print("Firebase Storage: Error downloading \(relativePath)")
+                }
                 return
             }
-            
-            handler(localUrl)
+
+            handlers.forEach { $0(localUrl) }
         }.resume()
     }
 }

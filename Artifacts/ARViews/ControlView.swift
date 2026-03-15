@@ -205,13 +205,16 @@ struct SceneButtons: View {
         ControlButton(systemIconName: "trash") {
             guard !sceneManager.isPersistenceInProgress else { return }
             print("clear scene button pressed")
+            let draftSceneId = sceneManager.selectedCloudSceneId
             for anchorEntity in sceneManager.anchorEntities {
                 print("Removing anchoEntity with id: \(String(describing: anchorEntity.anchorIdentifier)))")
                 anchorEntity.removeFromParent()
             }
             sceneManager.anchorEntities.removeAll()
+            sceneManager.modelAnchorEntitiesByArtifactId.removeAll()
             sceneManager.fallbackArtifactAnchorEntity?.removeFromParent()
             sceneManager.fallbackArtifactAnchorEntity = nil
+            sceneManager.fallbackModelEntitiesByArtifactId.removeAll()
             sceneManager.fallbackRestoredModelArtifactIds.removeAll()
             sceneManager.fallbackRestoredAnnotationArtifactIds.removeAll()
 
@@ -240,6 +243,12 @@ struct SceneButtons: View {
 
             NotificationCenter.default.post(name: .clearAllAnnotations, object: nil)
             NotificationCenter.default.post(name: .clearAllDrawingStrokes, object: nil)
+
+            if let draftSceneId, !draftSceneId.isEmpty {
+                Task {
+                    try? await ArtifactsService.shared.deleteMyDraftArtifacts(sceneId: draftSceneId)
+                }
+            }
         }
         .disabled(sceneManager.isPersistenceInProgress)
     }

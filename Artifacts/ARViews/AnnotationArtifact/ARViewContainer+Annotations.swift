@@ -19,6 +19,29 @@ extension ARViewContainer {
 
 extension ARViewContainer {
 
+    func prefetchOwnerUsernameIfNeeded(ownerUid: String) {
+        guard !ownerUid.isEmpty else { return }
+        if self.sceneManager.artifactOwnerUsernames[ownerUid] != nil { return }
+        if ownerUid == Auth.auth().currentUser?.uid,
+           let displayName = Auth.auth().currentUser?.displayName,
+           !displayName.isEmpty {
+            self.sceneManager.artifactOwnerUsernames[ownerUid] = displayName
+            return
+        }
+        guard !self.sceneManager.artifactOwnerUsernameLookupsInFlight.contains(ownerUid) else { return }
+        self.sceneManager.artifactOwnerUsernameLookupsInFlight.insert(ownerUid)
+
+        Task {
+            let username = try? await ArtifactsService.shared.fetchUsername(for: ownerUid)
+            await MainActor.run {
+                self.sceneManager.artifactOwnerUsernameLookupsInFlight.remove(ownerUid)
+                if let username = username, !username.isEmpty {
+                    self.sceneManager.artifactOwnerUsernames[ownerUid] = username
+                }
+            }
+        }
+    }
+
     func startRealtimeAnnotationSyncIfNeeded(on arView: ARView) {
         guard let sceneId = self.sceneManager.selectedCloudSceneId, !sceneId.isEmpty else { return }
 
@@ -235,6 +258,7 @@ extension ARViewContainer {
         }
 
         self.sceneManager.artifactOwnerBadgeOwnerUids[artifactId] = ownerUid
+        self.prefetchOwnerUsernameIfNeeded(ownerUid: ownerUid)
 
         if let username = self.sceneManager.artifactOwnerUsernames[ownerUid], !username.isEmpty {
             label.text = "@\(username)"
@@ -298,22 +322,7 @@ extension ARViewContainer {
             label.bounds.size.width = max(44, label.bounds.width + 10)
             return
         }
-        guard !self.sceneManager.artifactOwnerUsernameLookupsInFlight.contains(ownerUid) else { return }
-        self.sceneManager.artifactOwnerUsernameLookupsInFlight.insert(ownerUid)
-
-        Task {
-            let username = try? await ArtifactsService.shared.fetchUsername(for: ownerUid)
-            await MainActor.run {
-                self.sceneManager.artifactOwnerUsernameLookupsInFlight.remove(ownerUid)
-                if let username = username, !username.isEmpty {
-                    self.sceneManager.artifactOwnerUsernames[ownerUid] = username
-                    label.text = "@\(username)"
-                    label.sizeToFit()
-                    label.bounds.size.width = max(44, label.bounds.width + 10)
-                    label.isHidden = false
-                }
-            }
-        }
+        self.prefetchOwnerUsernameIfNeeded(ownerUid: ownerUid)
     }
 
     private func shouldShowDeleteButton(for id: UUID) -> Bool {

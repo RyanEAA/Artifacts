@@ -120,6 +120,16 @@ class DrawingManager: ObservableObject {
         objectWillChange.send()
     }
 
+    @discardableResult
+    func removeStroke(artifactId: String, in scene: RealityKit.Scene) -> Bool {
+        guard let index = strokeGroups.firstIndex(where: { $0.artifactId == artifactId }) else { return false }
+        let stroke = strokeGroups.remove(at: index)
+        stroke.beads.forEach { $0.removeFromParent() }
+        totalBeadCount = max(0, totalBeadCount - stroke.beads.count)
+        objectWillChange.send()
+        return true
+    }
+
     var canUndo: Bool { !strokeGroups.isEmpty }
 
     func appendRestoredStroke(

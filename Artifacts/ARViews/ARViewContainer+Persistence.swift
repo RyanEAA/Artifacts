@@ -10,6 +10,33 @@ import FirebaseAuth
 
 extension ARViewContainer {
 
+    func consumeMatchingVisibleModelRecord(modelName: String, transform: simd_float4x4) -> ModelArtifactRecord? {
+        guard self.sceneManager.isLoadArtifactFilterActive else { return nil }
+
+        let candidates = self.sceneManager.loadVisibleModelRecords.enumerated().filter { _, record in
+            record.modelName == modelName && self.transformsRoughlyMatch(record.transform, transform)
+        }
+
+        guard let best = candidates.min(by: { lhs, rhs in
+            self.transformDistance(lhs.element.transform, transform) < self.transformDistance(rhs.element.transform, transform)
+        }) else {
+            return nil
+        }
+
+        self.sceneManager.loadVisibleModelRecords.remove(at: best.offset)
+        return best.element
+    }
+
+    private func transformsRoughlyMatch(_ lhs: simd_float4x4, _ rhs: simd_float4x4) -> Bool {
+        transformDistance(lhs, rhs) < 0.06
+    }
+
+    private func transformDistance(_ lhs: simd_float4x4, _ rhs: simd_float4x4) -> Float {
+        let lp = SIMD3<Float>(lhs.columns.3.x, lhs.columns.3.y, lhs.columns.3.z)
+        let rp = SIMD3<Float>(rhs.columns.3.x, rhs.columns.3.y, rhs.columns.3.z)
+        return simd_distance(lp, rp)
+    }
+
     private func modelNamesInScene(from scenePersistenceData: Data) -> [String] {
         guard let worldMap = try? NSKeyedUnarchiver.unarchivedObject(
             ofClass: ARWorldMap.self,
@@ -173,7 +200,10 @@ extension ARViewContainer {
         self.sceneManager.beginPersistenceProgress("Loading scene...")
         self.sceneManager.stopAnnotationTextListener()
         self.sceneManager.selectedSceneOwnerUid = nil
+        self.sceneManager.resetLoadArtifactFilters()
         self.sceneManager.anchorEntities.removeAll(keepingCapacity: true)
+        self.sceneManager.modelAnchorEntitiesByArtifactId.removeAll(keepingCapacity: true)
+        self.sceneManager.fallbackModelEntitiesByArtifactId.removeAll(keepingCapacity: true)
         self.clearAllDrawings(in: arView)
         self.sceneManager.fallbackArtifactAnchorEntity?.removeFromParent()
         self.sceneManager.fallbackArtifactAnchorEntity = nil
@@ -228,16 +258,31 @@ extension ARViewContainer {
             load { result in
                 switch result {
                 case .success(let data):
-                    let expected = self.expectedArtifactCounts(from: data)
-                    let modelNames = self.modelNamesInScene(from: data)
-                    self.preloadModelEntities(named: modelNames)
-                    ScenePersistenceHelper.loadScene(for: arView, with: data)
-                    self.restoreDrawingsAfterRelocalization(sceneId: id, in: arView)
-                    self.sceneManager.beginAwaitingVisibleArtifactsAfterLoad(
-                        expectedModels: expected.models,
-                        expectedAnnotations: expected.annotations
-                    )
-                    self.sceneManager.startLoadVisibilityTimeout()
+                    Task {
+                        let modelNames = self.modelNamesInScene(from: data)
+                        async let drawingCountTask = ArtifactsService.shared.fetchVisibleDrawingArtifactCount(sceneId: id)
+                        async let modelRecordsTask = ArtifactsService.shared.fetchVisibleModelArtifacts(sceneId: id)
+                        async let annotationRecordsTask = ArtifactsService.shared.fetchVisibleAnnotationArtifacts(sceneId: id)
+                        let drawingCount = (try? await drawingCountTask) ?? 0
+                        let modelRecords = (try? await modelRecordsTask) ?? []
+                        let annotationRecords = (try? await annotationRecordsTask) ?? []
+                        await MainActor.run {
+                            self.preloadModelEntities(named: modelNames)
+                            self.sceneManager.loadVisibleModelRecords = modelRecords
+                            self.sceneManager.loadVisibleAnnotationArtifactIDs = Set(annotationRecords.map(\.artifactId))
+                            self.sceneManager.isLoadArtifactFilterActive = true
+                            let ownerUIDs = Set(modelRecords.map(\.ownerUid)).union(annotationRecords.map(\.ownerUid))
+                            ownerUIDs.forEach { self.prefetchOwnerUsernameIfNeeded(ownerUid: $0) }
+                            self.sceneManager.beginAwaitingVisibleArtifactsAfterLoad(
+                                expectedModels: modelRecords.count,
+                                expectedAnnotations: annotationRecords.count,
+                                expectedDrawings: drawingCount
+                            )
+                            ScenePersistenceHelper.loadScene(for: arView, with: data)
+                            self.restoreDrawingsAfterRelocalization(sceneId: id, in: arView)
+                            self.sceneManager.startLoadVisibilityTimeout()
+                        }
+                    }
                 case .failure(let error):
                     print("Cloud load failed:", error)
                     DispatchQueue.main.async {
@@ -252,20 +297,38 @@ extension ARViewContainer {
             }
         } else {
             let handleLoad: (String, String?, Data) -> Void = { sceneId, storagePath, data in
-                let expected = self.expectedArtifactCounts(from: data)
-                let modelNames = self.modelNamesInScene(from: data)
-                self.preloadModelEntities(named: modelNames)
-                self.sceneManager.selectedCloudSceneId = sceneId
-                self.sceneManager.selectedCloudSceneStoragePath = storagePath
                 Task {
+                    let modelNames = self.modelNamesInScene(from: data)
+                    async let drawingCountTask = ArtifactsService.shared.fetchVisibleDrawingArtifactCount(sceneId: sceneId)
+                    async let modelRecordsTask = ArtifactsService.shared.fetchVisibleModelArtifacts(sceneId: sceneId)
+                    async let annotationRecordsTask = ArtifactsService.shared.fetchVisibleAnnotationArtifacts(sceneId: sceneId)
+                    let drawingCount = (try? await drawingCountTask) ?? 0
+                    let modelRecords = (try? await modelRecordsTask) ?? []
+                    let annotationRecords = (try? await annotationRecordsTask) ?? []
+                    await MainActor.run {
+                        self.preloadModelEntities(named: modelNames)
+                        self.sceneManager.selectedCloudSceneId = sceneId
+                        self.sceneManager.selectedCloudSceneStoragePath = storagePath
+                        self.sceneManager.loadVisibleModelRecords = modelRecords
+                        self.sceneManager.loadVisibleAnnotationArtifactIDs = Set(annotationRecords.map(\.artifactId))
+                        self.sceneManager.isLoadArtifactFilterActive = true
+                        let ownerUIDs = Set(modelRecords.map(\.ownerUid)).union(annotationRecords.map(\.ownerUid))
+                        ownerUIDs.forEach { self.prefetchOwnerUsernameIfNeeded(ownerUid: $0) }
+                    }
                     let ownerUid = try? await ArtifactsService.shared.fetchSceneOwnerUid(sceneId: sceneId)
                     await MainActor.run {
                         self.sceneManager.selectedSceneOwnerUid = ownerUid ?? Auth.auth().currentUser?.uid
+                        self.sceneManager.beginAwaitingVisibleArtifactsAfterLoad(
+                            expectedModels: modelRecords.count,
+                            expectedAnnotations: annotationRecords.count,
+                            expectedDrawings: drawingCount
+                        )
+                        ScenePersistenceHelper.loadScene(for: arView, with: data)
+                        self.restoreDrawingsAfterRelocalization(sceneId: sceneId, in: arView)
+                        self.sceneManager.startLoadVisibilityTimeout()
                     }
-                }
-                self.startRealtimeAnnotationSyncIfNeeded(on: arView)
+                    self.startRealtimeAnnotationSyncIfNeeded(on: arView)
 
-                Task {
                     do {
                         let overrides = try await ArtifactsService.shared.fetchVisibleAnnotationTextOverrides(sceneId: sceneId)
                         await MainActor.run {
@@ -275,14 +338,6 @@ extension ARViewContainer {
                         print("⚠️ fetchVisibleAnnotationTextOverrides error:", error.localizedDescription)
                     }
                 }
-
-                ScenePersistenceHelper.loadScene(for: arView, with: data)
-                self.restoreDrawingsAfterRelocalization(sceneId: sceneId, in: arView)
-                self.sceneManager.beginAwaitingVisibleArtifactsAfterLoad(
-                    expectedModels: expected.models,
-                    expectedAnnotations: expected.annotations
-                )
-                self.sceneManager.startLoadVisibilityTimeout()
             }
 
             CloudSceneStore.loadMostRecentSceneData { ownResult in
@@ -339,21 +394,14 @@ extension ARViewContainer {
             worldContainer.transform.matrix = record.transform
             worldContainer.addChild(entity)
             root.addChild(worldContainer)
+            self.sceneManager.fallbackModelEntitiesByArtifactId[record.artifactId] = worldContainer
             self.sceneManager.fallbackRestoredModelArtifactIds.insert(record.artifactId)
-            let pos = SIMD3<Float>(
-                record.transform.columns.3.x,
-                record.transform.columns.3.y,
-                record.transform.columns.3.z
-            )
-            let hasAnchorBackedModelBadge = self.sceneManager.artifactOwnerBadgeViews.keys.contains {
-                $0.hasPrefix("model-anchor-")
-            }
-            if !hasAnchorBackedModelBadge {
+            if self.sceneManager.artifactOwnerBadgeViews[record.artifactId] == nil {
                 self.upsertArtifactOwnerBadge(
                     artifactId: record.artifactId,
                     ownerUid: record.ownerUid,
-                    worldPosition: pos,
-                    yOffset: -40,
+                    worldPosition: self.modelBadgeWorldPosition(for: entity),
+                    yOffset: -8,
                     on: arView
                 )
             }

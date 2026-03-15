@@ -7,8 +7,18 @@ import RealityKit
 import ARKit
 import UIKit
 import FirebaseAuth
+import QuartzCore
 
 extension ARViewContainer {
+
+    func modelBadgeWorldPosition(for modelEntity: ModelEntity) -> SIMD3<Float> {
+        let bounds = modelEntity.visualBounds(relativeTo: nil)
+        return SIMD3<Float>(
+            bounds.center.x,
+            bounds.center.y + (bounds.extents.y * 0.5) + 0.06,
+            bounds.center.z
+        )
+    }
 
     func writableSceneIdForArtifactWrites() async throws -> String {
         let preferred = self.sceneManager.selectedCloudSceneId
@@ -74,17 +84,21 @@ extension ARViewContainer {
         if case .model(let model) = placementSettings.selectedTool {
             arView.focusEntity?.isEnabled = true
 
-
             guard let entity = model.modelEntity else { return }
 
-            // Create preview if it doesn't exist
-            if placementSettings.previewEntity == nil {
+            let shouldRebuildPreview = placementSettings.previewEntity == nil
+                || placementSettings.previewModelName != model.name
 
+            if shouldRebuildPreview {
+                placementSettings.previewEntity?.removeFromParent()
                 let preview = entity.clone(recursive: true)
                 makePreviewTransparent(preview)
                 preview.generateCollisionShapes(recursive: true)
 
                 placementSettings.previewEntity = preview
+                placementSettings.previewModelName = model.name
+                placementSettings.lastPreviewTransform = nil
+                placementSettings.lastPreviewUpdateTimestamp = 0
 
                 let anchor = AnchorEntity(world: .zero)
                 anchor.addChild(preview)
@@ -92,49 +106,71 @@ extension ARViewContainer {
                 arView.scene.addAnchor(anchor)
             }
 
-            // Update preview position every frame
-            if let transform = getTransformForPlacement(in: arView),
+            if let transform = getTransformForPlacement(in: arView) {
+                placementSettings.lastPreviewTransform = transform
+            }
+
+            if let transform = placementSettings.lastPreviewTransform,
                let preview = placementSettings.previewEntity,
                let anchor = preview.anchor {
-
                 anchor.transform.matrix = transform
             }
 
          } else {
-             // Remove preview if user exited placement mode
              placementSettings.previewEntity?.removeFromParent()
              placementSettings.previewEntity = nil
+             placementSettings.previewModelName = nil
+             placementSettings.lastPreviewTransform = nil
+             placementSettings.lastPreviewUpdateTimestamp = 0
              arView.focusEntity?.isEnabled = false
              
          }
 
-        if let modelAnchor = self.placementSettings.modelsConfirmedForPlacement.popLast(),
-           let modelEntity = modelAnchor.model.modelEntity {
+        while let modelAnchor = self.placementSettings.modelsConfirmedForPlacement.popLast(),
+              let modelEntity = modelAnchor.model.modelEntity {
 
             if let anchor = modelAnchor.anchor {
-                self.place(modelEntity, for: anchor, in: arView)
+                let placed = self.place(modelEntity, for: anchor, in: arView)
+                let artifactId = modelAnchor.artifactId ?? "model-anchor-\(anchor.identifier.uuidString)"
+                let ownerUid = modelAnchor.ownerUid ?? self.sceneManager.selectedSceneOwnerUid ?? Auth.auth().currentUser?.uid ?? ""
+                self.sceneManager.modelAnchorEntitiesByArtifactId[artifactId] = placed.anchorEntity
+                if !ownerUid.isEmpty {
+                    self.upsertArtifactOwnerBadge(
+                        artifactId: artifactId,
+                        ownerUid: ownerUid,
+                        worldPosition: self.modelBadgeWorldPosition(for: placed.modelEntity),
+                        yOffset: -8,
+                        on: arView
+                    )
+                }
+                if let artifactId = modelAnchor.artifactId {
+                    self.sceneManager.fallbackRestoredModelArtifactIds.insert(artifactId)
+                }
                 self.sceneManager.markRestoredModelIfAwaiting()
 
             } else if let transform = getTransformForPlacement(in: arView) {
                 let anchorName = anchorNamePrefix + modelAnchor.model.name
                 let anchor = ARAnchor(name: anchorName, transform: transform)
-                self.place(modelEntity, for: anchor, in: arView)
+                let placed = self.place(modelEntity, for: anchor, in: arView)
                 arView.session.add(anchor: anchor)
                 self.placementSettings.recentlyPlaced.append(modelAnchor.model)
-                let artifactId = UUID().uuidString
+                let artifactId = modelAnchor.artifactId ?? UUID().uuidString
                 let ownerUid = Auth.auth().currentUser?.uid ?? ""
-                let pos = SIMD3<Float>(
-                    transform.columns.3.x,
-                    transform.columns.3.y,
-                    transform.columns.3.z
-                )
-                self.upsertArtifactOwnerBadge(
-                    artifactId: artifactId,
-                    ownerUid: ownerUid,
-                    worldPosition: pos,
-                    yOffset: -40,
-                    on: arView
-                )
+                self.sceneManager.modelAnchorEntitiesByArtifactId[artifactId] = placed.anchorEntity
+                if !ownerUid.isEmpty {
+                    self.upsertArtifactOwnerBadge(
+                        artifactId: artifactId,
+                        ownerUid: ownerUid,
+                        worldPosition: self.modelBadgeWorldPosition(for: placed.modelEntity),
+                        yOffset: -8,
+                        on: arView
+                    )
+                }
+                placementSettings.previewEntity?.removeFromParent()
+                placementSettings.previewEntity = nil
+                placementSettings.previewModelName = nil
+                placementSettings.lastPreviewTransform = nil
+                placementSettings.lastPreviewUpdateTimestamp = 0
                 saveModelToFirestore(
                     artifactId: artifactId,
                     modelName: modelAnchor.model.name,
@@ -148,7 +184,6 @@ extension ARViewContainer {
     }
     
     func makePreviewTransparent(_ entity: Entity) {
-
         if let modelEntity = entity as? ModelEntity {
 
             var newMaterials: [Material] = []
@@ -157,7 +192,7 @@ extension ARViewContainer {
 
                 if var pbr = material as? PhysicallyBasedMaterial {
 
-                    pbr.blending = .transparent(opacity: .init(floatLiteral: 0.35))
+                    pbr.blending = .transparent(opacity: .init(floatLiteral: 0.18))
                     newMaterials.append(pbr)
 
                 } else if var simple = material as? SimpleMaterial {
@@ -166,11 +201,15 @@ extension ARViewContainer {
                         tint: simple.color.tint,
                         texture: simple.color.texture
                     )
-                    simple.color.tint = simple.color.tint.withAlphaComponent(0.35)
+                    simple.color.tint = simple.color.tint.withAlphaComponent(0.18)
                     newMaterials.append(simple)
 
                 } else {
-                    newMaterials.append(material)
+                    var fallback = SimpleMaterial()
+                    fallback.color = .init(tint: UIColor.white.withAlphaComponent(0.18), texture: nil)
+                    fallback.roughness = .float(1.0)
+                    fallback.metallic = .float(0.0)
+                    newMaterials.append(fallback)
                 }
             }
 
@@ -183,7 +222,8 @@ extension ARViewContainer {
         }
     }
 
-    func place(_ modelEntity: ModelEntity, for anchor: ARAnchor, in arView: ARView) {
+    @discardableResult
+    func place(_ modelEntity: ModelEntity, for anchor: ARAnchor, in arView: ARView) -> (modelEntity: ModelEntity, anchorEntity: AnchorEntity) {
 
         let clonedEntity = modelEntity.clone(recursive: true)
         clonedEntity.generateCollisionShapes(recursive: true)
@@ -210,9 +250,14 @@ extension ARViewContainer {
         )
 
         self.sceneManager.anchorEntities.append(anchorEntity)
+        return (clonedEntity, anchorEntity)
     }
 
     func getTransformForPlacement(in arView: ARView) -> simd_float4x4? {
+        if let customARView = arView as? CustomARView,
+           let focusEntity = customARView.focusEntity {
+            return focusEntity.transformMatrix(relativeTo: nil)
+        }
         return bestPlacementTransform(in: arView, from: arView.center)
     }
 
