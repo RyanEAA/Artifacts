@@ -13,19 +13,6 @@ struct DrawingToolbarView: View {
 
     private var dm: DrawingManager { sceneManager.drawingManager }
 
-    private let palette: [UIColor] = [
-        .white,
-        UIColor.mintGreen,
-        .systemYellow,
-        .systemOrange,
-        .systemRed,
-        .systemPink,
-        .systemPurple,
-        .systemBlue,
-        .systemCyan,
-        .black,
-    ]
-
     var body: some View {
         guard case .draw = placementSettings.selectedTool else {
             return AnyView(EmptyView())
@@ -64,19 +51,7 @@ struct DrawingToolbarView: View {
                 }
 
                 HStack(spacing: 10) {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(palette, id: \.self) { uiColor in
-                                ColorSwatch(
-                                    uiColor: uiColor,
-                                    isSelected: uiColor.cgColor == dm.brushColor.cgColor
-                                ) {
-                                    dm.brushColor = uiColor
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 1)
-                    }
+                    DrawingColorPicker(dm: dm)
 
                     DrawToolbarButton(icon: "arrow.uturn.backward",
                                       label: "Undo",
@@ -164,30 +139,59 @@ private struct ModeButton: View {
     }
 }
 
-// MARK: - Colour Swatch
+// MARK: - Colour Picker
 
-private struct ColorSwatch: View {
-    let uiColor: UIColor
-    let isSelected: Bool
-    let action: () -> Void
+private struct DrawingColorPicker: View {
+    @ObservedObject var dm: DrawingManager
 
     var body: some View {
-        Button(action: action) {
-            ZStack {
-                Circle()
-                    .fill(Color(uiColor))
-                    .frame(width: 28, height: 28)
-                    .overlay(
-                        Circle().stroke(Color.black.opacity(0.15), lineWidth: 1)
-                    )
-                Circle()
-                    .stroke(Color.white.opacity(isSelected ? 0.95 : 0), lineWidth: 2)
-                    .frame(width: 32, height: 32)
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Color")
+                    .font(.custom("Poppins-SemiBold", size: 11))
+                    .foregroundColor(Color.white.opacity(0.9))
+
+                Text(hexString(for: dm.brushColor))
+                    .font(.custom("Poppins-Regular", size: 10))
+                    .foregroundColor(Color.white.opacity(0.55))
             }
-            .frame(width: 34, height: 34)
-            .animation(.easeInOut(duration: 0.15), value: isSelected)
+
+            Spacer(minLength: 8)
+
+            ColorPicker(
+                "",
+                selection: Binding(
+                    get: { Color(uiColor: dm.brushColor) },
+                    set: { dm.brushColor = UIColor($0) }
+                ),
+                supportsOpacity: false
+            )
+            .labelsHidden()
+            .frame(width: 32, height: 32)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(minWidth: 156)
+        .background(Color.white.opacity(0.04))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func hexString(for color: UIColor) -> String {
+        var red: CGFloat = 1
+        var green: CGFloat = 1
+        var blue: CGFloat = 1
+        var alpha: CGFloat = 1
+        color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        return String(
+            format: "#%02X%02X%02X",
+            Int(round(red * 255)),
+            Int(round(green * 255)),
+            Int(round(blue * 255))
+        )
     }
 }
 
