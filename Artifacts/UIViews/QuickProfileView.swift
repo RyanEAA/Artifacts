@@ -16,6 +16,7 @@ import FirebaseStorage
 struct QuickProfileView: View {
     @EnvironmentObject var session: SessionManager
     @EnvironmentObject var friendsService: FriendsService
+    @StateObject private var locationService = LocationService.shared
 
     private let artifactsService = ArtifactsService.shared
 
@@ -30,11 +31,13 @@ struct QuickProfileView: View {
 
     @State private var showFriends = false
     @State private var showFullMap = false
+    @State private var showSettings = false
 
     @State private var selectedArtifact: ArtifactMapItem?
     @State private var selectedClusterID: String?
     @State private var didAutoCenter = false
     @State private var artifactListenerOwnerUIDs: Set<String> = []
+    @State private var clusteredArtifacts: [ArtifactCluster] = []
 
     @State private var showArtifactManager = false
 
@@ -64,19 +67,6 @@ struct QuickProfileView: View {
     private var myArtifacts: [ArtifactMapItem] {
         guard let uid = currentUID else { return [] }
         return artifacts.filter { $0.ownerUid == uid }
-    }
-    private var clusters: [ArtifactCluster] {
-        ArtifactMapClusterer.makeClusters(items: artifacts)
-    }
-    private var mapRegionBinding: Binding<MKCoordinateRegion> {
-        Binding(
-            get: { region },
-            set: { newValue in
-                DispatchQueue.main.async {
-                    region = newValue
-                }
-            }
-        )
     }
     private var currentUID: String? {
         Auth.auth().currentUser?.uid
@@ -112,6 +102,13 @@ struct QuickProfileView: View {
         .sheet(isPresented: $showFriends) {
             FriendsListSheet(friends: $friends)
         }
+        .sheet(isPresented: $showSettings) {
+            ProfileSettingsSheet()
+                .environmentObject(session)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(.black)
+        }
         .fullScreenCover(isPresented: $showFullMap) {
             FullMapView(region: region, artifacts: artifacts, ownerAvatarURLs: ownerAvatarURLs) { newRegion in
                 region = newRegion
@@ -142,6 +139,10 @@ struct QuickProfileView: View {
         }
         .onAppear {
             profileImageURL = (session.userData?["profilePictureURL"] as? String)
+            locationService.start()
+            if !didAutoCenter, !hasArtifacts, let coordinate = locationService.currentOrCachedCoordinate() {
+                region.center = coordinate
+            }
             handleAuthContextChange(to: session.user?.uid)
         }
         .onDisappear {
@@ -160,6 +161,22 @@ struct QuickProfileView: View {
                     ownerAvatarURLs.removeValue(forKey: myUid)
                 }
             }
+        }
+        .onChange(of: locationService.currentCoordinate?.latitude) { _, _ in
+            guard
+                !didAutoCenter,
+                !hasArtifacts,
+                let coordinate = locationService.currentCoordinate
+            else { return }
+            region.center = coordinate
+        }
+        .onChange(of: locationService.currentCoordinate?.longitude) { _, _ in
+            guard
+                !didAutoCenter,
+                !hasArtifacts,
+                let coordinate = locationService.currentCoordinate
+            else { return }
+            region.center = coordinate
         }
     }
 
@@ -228,6 +245,22 @@ struct QuickProfileView: View {
 
             Spacer()
 
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(Color("MintGreen").opacity(0.92))
+                    .frame(width: 40, height: 40)
+                    .background(Color.white.opacity(0.06))
+                    .overlay(
+                        Circle()
+                            .stroke(Color("MintGreen").opacity(0.24), lineWidth: 1)
+                    )
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open settings")
 
         }
         .padding(14)
@@ -281,30 +314,14 @@ struct QuickProfileView: View {
             }
 
             ZStack(alignment: .bottomLeading) {
-                Map(coordinateRegion: mapRegionBinding, annotationItems: clusters) { cluster in
-                    MapAnnotation(coordinate: cluster.coordinate) {
-                        ArtifactMarkerView(
-                            owners: markerOwners(for: cluster),
-                            isSelected: selectedClusterID == cluster.id
-                        )
-                        .onTapGesture {
-                            DispatchQueue.main.async {
-                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                selectedClusterID = cluster.id
-                                handleClusterTap(cluster)
-                            }
-                        }
-                        .onLongPressGesture {
-                            DispatchQueue.main.async {
-                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                                selectedClusterID = cluster.id
-                                if let item = cluster.items.first {
-                                    selectedArtifact = item
-                                }
-                            }
-                        }
-                    }
-                }
+                EmbeddedArtifactMap(
+                    region: $region,
+                    clusters: clusteredArtifacts,
+                    selectedClusterID: $selectedClusterID,
+                    markerOwners: markerOwners(for:),
+                    onClusterTap: handleClusterTap(_:),
+                    onClusterLongPress: handleClusterLongPress(_:)
+                )
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
@@ -378,14 +395,36 @@ struct QuickProfileView: View {
         }
     }
 
+    private func handleClusterLongPress(_ cluster: ArtifactCluster) {
+        selectedClusterID = cluster.id
+        selectedArtifact = cluster.items.first
+    }
+
     private func startFriendsListener() {
         friendsListener?.remove()
         do {
             friendsListener = try friendsService.listenFriendUIDs { uids in
                 Task {
                     let normalizedUIDs = Set(uids)
+                    let cachedUsers = await MainActor.run { friendsService.cachedUsers(for: Array(normalizedUIDs)) }
+                    let cachedNames = cachedUsers
+                        .map(\.username)
+                        .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+                    let cachedAvatarMap: [String: String] = Dictionary(
+                        uniqueKeysWithValues: cachedUsers.compactMap { user in
+                            guard let url = user.profilePictureURL, !url.isEmpty else { return nil }
+                            return (user.id, url)
+                        }
+                    )
+
                     await MainActor.run {
                         self.friendCount = normalizedUIDs.count
+                        if !cachedNames.isEmpty {
+                            self.friends = cachedNames
+                        }
+                        if !cachedAvatarMap.isEmpty {
+                            self.ownerAvatarURLs.merge(cachedAvatarMap) { _, new in new }
+                        }
                         if normalizedUIDs != Set(self.friendUIDs) {
                             self.friendUIDs = normalizedUIDs.sorted()
                             self.refreshArtifactsListener()
@@ -429,6 +468,7 @@ struct QuickProfileView: View {
         friends = []
         friendUIDs = []
         artifacts = []
+        clusteredArtifacts = []
         hasResolvedArtifactsOnce = false
         artifactListenerOwnerUIDs = []
         ownerAvatarURLs = [:]
@@ -450,6 +490,7 @@ struct QuickProfileView: View {
                 self.hasResolvedArtifactsOnce = true
                 guard self.artifacts != items else { return }
                 self.artifacts = items
+                self.clusteredArtifacts = ArtifactMapClusterer.makeClusters(items: items)
                 let ownerUIDSet = Set(items.map(\.ownerUid))
                 if ownerUIDSet != self.activeArtifactOwnerUIDs {
                     self.activeArtifactOwnerUIDs = ownerUIDSet
@@ -478,6 +519,20 @@ struct QuickProfileView: View {
                 }
             }
             return
+        }
+
+        let cachedUsers = await MainActor.run { friendsService.cachedUsers(for: ownerUIDs) }
+        let cachedAvatarMap: [String: String] = Dictionary(
+            uniqueKeysWithValues: cachedUsers.compactMap { user in
+                guard let url = user.profilePictureURL, !url.isEmpty else { return nil }
+                return (user.id, url)
+            }
+        )
+
+        if !cachedAvatarMap.isEmpty {
+            await MainActor.run {
+                ownerAvatarURLs.merge(cachedAvatarMap) { _, new in new }
+            }
         }
 
         do {
@@ -511,11 +566,15 @@ struct QuickProfileView: View {
     }
 
     private func markerOwners(for cluster: ArtifactCluster) -> [ArtifactMarkerOwner] {
-        cluster.ownerArtifactCounts.map { bucket in
+        let recentCutoff = Date().addingTimeInterval(-86_400)
+        return cluster.ownerArtifactCounts.map { bucket in
             ArtifactMarkerOwner(
                 ownerUid: bucket.ownerUid,
                 imageURL: avatarURL(for: bucket.ownerUid),
-                count: bucket.count
+                count: bucket.count,
+                isRecent: cluster.items.contains { item in
+                    item.ownerUid == bucket.ownerUid && item.createdAt >= recentCutoff
+                }
             )
         }
     }
@@ -612,6 +671,623 @@ struct QuickProfileView: View {
                 }
             }
         }
+    }
+}
+
+private struct ProfileSettingsSheet: View {
+    @EnvironmentObject private var session: SessionManager
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var username = ""
+    @State private var feedback: SettingsFeedback?
+    @State private var isSaving = false
+    @State private var isDeleting = false
+    @State private var showDeleteConfirmation = false
+    @FocusState private var isUsernameFocused: Bool
+
+    private var canSave: Bool {
+        let trimmed = username.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let current = (session.userData?["username"] as? String ?? "").lowercased()
+        return !trimmed.isEmpty && trimmed != current && !isSaving && !isDeleting
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                SettingsSheetBackground()
+                    .ignoresSafeArea()
+
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 14) {
+                        topBar
+
+                        sectionCard(title: "Profile") {
+                            VStack(spacing: 12) {
+                                if let feedback {
+                                    SettingsBanner(feedback: feedback) {
+                                        withAnimation(.easeInOut(duration: 0.20)) {
+                                            self.feedback = nil
+                                        }
+                                    }
+                                    .transition(.move(edge: .top).combined(with: .opacity))
+                                }
+
+                                SettingsInputRow(
+                                    systemImage: "person",
+                                    title: "Username",
+                                    text: $username,
+                                    submitLabel: .done
+                                )
+                                .focused($isUsernameFocused)
+                                .onSubmit {
+                                    submitUsernameChange()
+                                }
+                                .onChange(of: username) { _, newValue in
+                                    username = newValue.lowercased()
+                                }
+
+                                Button(action: submitUsernameChange) {
+                                    ZStack {
+                                        Text("Save Username")
+                                            .opacity(isSaving ? 0 : 1)
+
+                                        if isSaving {
+                                            ProgressView()
+                                                .tint(Color("DarkGray"))
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(SettingsPrimaryButtonStyle())
+                                .disabled(!canSave)
+                                .opacity(canSave ? 1 : 0.55)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+
+                        sectionCard(title: "Account") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                if showDeleteConfirmation {
+                                    SettingsConfirmationCard(
+                                        title: "Are you sure?",
+                                        message: "Delete your account",
+                                        confirmTitle: isDeleting ? "Yes..." : "Yes",
+                                        cancelTitle: "No",
+                                        isConfirmDisabled: isDeleting,
+                                        onConfirm: deleteAccount,
+                                        onCancel: {
+                                            withAnimation(.easeInOut(duration: 0.20)) {
+                                                showDeleteConfirmation = false
+                                            }
+                                        }
+                                    )
+                                    .transition(.move(edge: .top).combined(with: .opacity))
+                                }
+
+                                Button {
+                                    UIApplication.shared.endEditing()
+                                    withAnimation(.easeInOut(duration: 0.20)) {
+                                        feedback = nil
+                                        showDeleteConfirmation = true
+                                    }
+                                } label: {
+                                    Text("Delete Account")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(SettingsDangerButtonStyle())
+                                .disabled(isDeleting)
+                                .opacity(showDeleteConfirmation ? 0.45 : 1)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+
+                        Spacer(minLength: 12)
+                    }
+                    .padding(.top, 10)
+                    .padding(.bottom, 18)
+                }
+            }
+            .navigationBarHidden(true)
+            .presentationBackground(.black)
+        }
+        .animation(.easeInOut(duration: 0.22), value: feedback?.id)
+        .animation(.easeInOut(duration: 0.22), value: showDeleteConfirmation)
+        .onAppear {
+            username = (session.userData?["username"] as? String) ?? ""
+        }
+        .onChange(of: session.userData?["username"] as? String) { _, newValue in
+            guard !isUsernameFocused else { return }
+            username = newValue ?? ""
+        }
+    }
+
+    private var topBar: some View {
+        HStack(spacing: 12) {
+            Text("Settings")
+                .font(.custom("Poppins-Bold", size: 22))
+                .foregroundColor(Color.white.opacity(0.92))
+
+            Spacer()
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(Color.white.opacity(0.88))
+                    .frame(width: 36, height: 36)
+                    .background(Color.white.opacity(0.06))
+                    .overlay(
+                        Circle().stroke(Color("MintGreen").opacity(0.18), lineWidth: 1)
+                    )
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+    }
+
+    private func sectionCard<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.custom("Poppins-SemiBold", size: 15))
+                .foregroundColor(Color.white.opacity(0.90))
+
+            content()
+        }
+        .padding(14)
+        .background(SettingsCardBackground())
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .cornerRadius(18)
+        .shadow(color: Color.black.opacity(0.50), radius: 18, x: 0, y: 12)
+    }
+
+    private func submitUsernameChange() {
+        guard canSave else { return }
+        UIApplication.shared.endEditing()
+        feedback = nil
+        showDeleteConfirmation = false
+
+        Task {
+            await MainActor.run {
+                isSaving = true
+            }
+
+            do {
+                try await session.updateUsername(to: username)
+                await MainActor.run {
+                    isSaving = false
+                    username = (session.userData?["username"] as? String) ?? username.lowercased()
+                    feedback = SettingsFeedback(
+                        kind: .success,
+                        text: "Username updated successfully."
+                    )
+                }
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                    feedback = SettingsFeedback(
+                        kind: .error,
+                        text: error.localizedDescription
+                    )
+                }
+            }
+        }
+    }
+
+    private func deleteAccount() {
+        feedback = nil
+
+        Task {
+            await MainActor.run {
+                isDeleting = true
+            }
+
+            do {
+                try await session.deleteCurrentAccount()
+                await MainActor.run {
+                    isDeleting = false
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isDeleting = false
+                    showDeleteConfirmation = false
+                    feedback = SettingsFeedback(
+                        kind: .error,
+                        text: error.localizedDescription
+                    )
+                }
+            }
+        }
+    }
+}
+
+private struct SettingsFeedback: Identifiable, Equatable {
+    enum Kind {
+        case success
+        case error
+    }
+
+    let kind: Kind
+    let text: String
+
+    var id: String { "\(kind)-\(text)" }
+}
+
+private struct SettingsSheetBackground: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                gradient: Gradient(stops: [
+                    .init(color: Color.black, location: 0.00),
+                    .init(color: Color("DarkGray").opacity(0.98), location: 0.60),
+                    .init(color: Color.black.opacity(0.96), location: 1.00)
+                ]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            LinearGradient(
+                gradient: Gradient(colors: [
+                    Color("MintGreen").opacity(0.08),
+                    Color.clear
+                ]),
+                startPoint: .topTrailing,
+                endPoint: .center
+            )
+
+            RadialGradient(
+                gradient: Gradient(colors: [
+                    Color.black.opacity(0.00),
+                    Color.black.opacity(0.60)
+                ]),
+                center: .center,
+                startRadius: 140,
+                endRadius: 640
+            )
+        }
+    }
+}
+
+private struct SettingsCardBackground: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 18)
+            .fill(Color.black.opacity(0.46))
+            .background(
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(Color.white.opacity(0.05))
+            )
+    }
+}
+
+private struct SettingsBanner: View {
+    let feedback: SettingsFeedback
+    let onDismiss: () -> Void
+
+    private var accentColor: Color {
+        switch feedback.kind {
+        case .success:
+            return Color("MintGreen").opacity(0.95)
+        case .error:
+            return Color.red.opacity(0.95)
+        }
+    }
+
+    private var iconName: String {
+        switch feedback.kind {
+        case .success:
+            return "checkmark.circle.fill"
+        case .error:
+            return "exclamationmark.triangle.fill"
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: iconName)
+                .foregroundColor(accentColor)
+
+            Text(feedback.text)
+                .font(.custom("Poppins-Regular", size: 14))
+                .foregroundColor(Color.white.opacity(0.86))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(Color.white.opacity(0.85))
+                    .padding(8)
+                    .background(Color.white.opacity(0.06))
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                    )
+                    .clipShape(Circle())
+            }
+            .accessibilityLabel("Dismiss message")
+        }
+        .padding(12)
+        .background(Color.black.opacity(0.62))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(accentColor.opacity(0.28), lineWidth: 1)
+        )
+        .cornerRadius(14)
+    }
+}
+
+private struct SettingsInputRow: View {
+    let systemImage: String
+    let title: String
+    @Binding var text: String
+    let submitLabel: SubmitLabel
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .foregroundColor(Color("MintGreen").opacity(0.92))
+                .frame(width: 22)
+
+            ZStack(alignment: .leading) {
+                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(title)
+                        .font(.custom("Poppins-Regular", size: 16))
+                        .foregroundColor(Color.white.opacity(0.40))
+                        .padding(.leading, 2)
+                }
+
+                TextField("", text: $text)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+                    .textContentType(.username)
+                    .submitLabel(submitLabel)
+                    .foregroundColor(Color.white.opacity(0.92))
+                    .tint(Color("MintGreen"))
+            }
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 12)
+        .background(Color.white.opacity(0.06))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+        )
+        .cornerRadius(14)
+    }
+}
+
+private struct SettingsConfirmationCard: View {
+    let title: String
+    let message: String
+    let confirmTitle: String
+    let cancelTitle: String
+    let isConfirmDisabled: Bool
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(Color.red.opacity(0.92))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.custom("Poppins-SemiBold", size: 14))
+                    .foregroundColor(Color.white.opacity(0.92))
+
+                Text(message)
+                    .font(.custom("Poppins-Regular", size: 12))
+                    .foregroundColor(Color.white.opacity(0.68))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 8) {
+                Button(action: onCancel) {
+                    Text(cancelTitle)
+                        .font(.custom("Poppins-SemiBold", size: 13))
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 12)
+                        .foregroundColor(Color.white.opacity(0.92))
+                }
+                .buttonStyle(.plain)
+                .background(Color.white.opacity(0.06))
+                .overlay(
+                    Capsule()
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                )
+                .clipShape(Capsule())
+
+                Button(action: onConfirm) {
+                    Text(confirmTitle)
+                        .font(.custom("Poppins-SemiBold", size: 13))
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 12)
+                        .foregroundColor(Color.white.opacity(0.94))
+                }
+                .buttonStyle(.plain)
+                .background(Color.red.opacity(0.16))
+                .overlay(
+                    Capsule()
+                        .stroke(Color.red.opacity(0.26), lineWidth: 1)
+                )
+                .clipShape(Capsule())
+                .disabled(isConfirmDisabled)
+                .opacity(isConfirmDisabled ? 0.55 : 1)
+            }
+        }
+        .padding(12)
+        .background(Color.black.opacity(0.62))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.red.opacity(0.22), lineWidth: 1)
+        )
+        .cornerRadius(14)
+    }
+}
+
+private struct SettingsPrimaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.custom("Poppins-SemiBold", size: 16))
+            .padding(.vertical, 14)
+            .padding(.horizontal, 16)
+            .background(Color("MintGreen"))
+            .foregroundColor(Color.black.opacity(0.92))
+            .cornerRadius(14)
+            .shadow(color: Color.black.opacity(configuration.isPressed ? 0.25 : 0.55), radius: 18, x: 0, y: 14)
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeInOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+private struct SettingsSecondaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.custom("Poppins-SemiBold", size: 16))
+            .padding(.vertical, 14)
+            .padding(.horizontal, 16)
+            .background(Color.white.opacity(0.06))
+            .foregroundColor(Color.white.opacity(0.90))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color("MintGreen").opacity(0.22), lineWidth: 1)
+            )
+            .cornerRadius(14)
+            .shadow(color: Color.black.opacity(configuration.isPressed ? 0.20 : 0.45), radius: 16, x: 0, y: 12)
+            .scaleEffect(configuration.isPressed ? 0.992 : 1)
+            .animation(.easeInOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+private struct SettingsDangerButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.custom("Poppins-SemiBold", size: 16))
+            .padding(.vertical, 14)
+            .padding(.horizontal, 16)
+            .background(Color.white.opacity(0.06))
+            .foregroundColor(Color.red.opacity(0.92))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color.red.opacity(0.24), lineWidth: 1)
+            )
+            .cornerRadius(14)
+            .shadow(color: Color.black.opacity(configuration.isPressed ? 0.18 : 0.36), radius: 14, x: 0, y: 10)
+            .scaleEffect(configuration.isPressed ? 0.992 : 1)
+            .animation(.easeInOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+private struct EmbeddedArtifactMap: View {
+    @Binding var region: MKCoordinateRegion
+    let clusters: [ArtifactCluster]
+    @Binding var selectedClusterID: String?
+    let markerOwners: (ArtifactCluster) -> [ArtifactMarkerOwner]
+    let onClusterTap: (ArtifactCluster) -> Void
+    let onClusterLongPress: (ArtifactCluster) -> Void
+
+    @State private var mapRegion: MKCoordinateRegion
+    @State private var pendingRegionSync: DispatchWorkItem?
+
+    init(
+        region: Binding<MKCoordinateRegion>,
+        clusters: [ArtifactCluster],
+        selectedClusterID: Binding<String?>,
+        markerOwners: @escaping (ArtifactCluster) -> [ArtifactMarkerOwner],
+        onClusterTap: @escaping (ArtifactCluster) -> Void,
+        onClusterLongPress: @escaping (ArtifactCluster) -> Void
+    ) {
+        _region = region
+        self.clusters = clusters
+        _selectedClusterID = selectedClusterID
+        self.markerOwners = markerOwners
+        self.onClusterTap = onClusterTap
+        self.onClusterLongPress = onClusterLongPress
+        _mapRegion = State(initialValue: region.wrappedValue)
+    }
+
+    var body: some View {
+        Map(coordinateRegion: $mapRegion, annotationItems: clusters) { cluster in
+            MapAnnotation(coordinate: cluster.coordinate) {
+                ArtifactMarkerView(
+                    owners: markerOwners(cluster),
+                    isSelected: selectedClusterID == cluster.id
+                )
+                .onTapGesture {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    selectedClusterID = cluster.id
+                    onClusterTap(cluster)
+                }
+                .onLongPressGesture {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    onClusterLongPress(cluster)
+                }
+            }
+        }
+        .onChange(of: region.center.latitude) { _ in
+            syncMapRegionFromParent()
+        }
+        .onChange(of: region.center.longitude) { _ in
+            syncMapRegionFromParent()
+        }
+        .onChange(of: region.span.latitudeDelta) { _ in
+            syncMapRegionFromParent()
+        }
+        .onChange(of: region.span.longitudeDelta) { _ in
+            syncMapRegionFromParent()
+        }
+        .onChange(of: mapRegion.center.latitude) { _ in
+            scheduleRegionSync()
+        }
+        .onChange(of: mapRegion.center.longitude) { _ in
+            scheduleRegionSync()
+        }
+        .onChange(of: mapRegion.span.latitudeDelta) { _ in
+            scheduleRegionSync()
+        }
+        .onChange(of: mapRegion.span.longitudeDelta) { _ in
+            scheduleRegionSync()
+        }
+        .onDisappear {
+            pendingRegionSync?.cancel()
+            region = mapRegion
+        }
+    }
+
+    private func syncMapRegionFromParent() {
+        guard !regionsMatch(mapRegion, region) else { return }
+        mapRegion = region
+    }
+
+    private func scheduleRegionSync() {
+        let newValue = mapRegion
+        guard !regionsMatch(region, newValue) else { return }
+        pendingRegionSync?.cancel()
+        let workItem = DispatchWorkItem {
+            region = newValue
+        }
+        pendingRegionSync = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: workItem)
+    }
+
+    private func regionsMatch(_ lhs: MKCoordinateRegion, _ rhs: MKCoordinateRegion) -> Bool {
+        abs(lhs.center.latitude - rhs.center.latitude) < 0.000_001 &&
+        abs(lhs.center.longitude - rhs.center.longitude) < 0.000_001 &&
+        abs(lhs.span.latitudeDelta - rhs.span.latitudeDelta) < 0.000_001 &&
+        abs(lhs.span.longitudeDelta - rhs.span.longitudeDelta) < 0.000_001
     }
 }
 

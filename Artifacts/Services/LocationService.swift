@@ -21,13 +21,22 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
         manager.distanceFilter = 10
+        currentCoordinate = manager.location?.coordinate
     }
 
     func start() {
         requestAuthorizationIfNeeded()
         if isAuthorized(status: manager.authorizationStatus) {
+            if let existing = manager.location?.coordinate {
+                currentCoordinate = existing
+            }
+            manager.requestLocation()
             manager.startUpdatingLocation()
         }
+    }
+
+    func currentOrCachedCoordinate() -> CLLocationCoordinate2D? {
+        currentCoordinate ?? manager.location?.coordinate
     }
 
     func requestAuthorizationIfNeeded() {
@@ -48,6 +57,12 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         }
 
         if isAuthorized(status: status) {
+            if let existing = manager.location?.coordinate {
+                DispatchQueue.main.async {
+                    self.currentCoordinate = existing
+                }
+            }
+            manager.requestLocation()
             manager.startUpdatingLocation()
         } else {
             manager.stopUpdatingLocation()

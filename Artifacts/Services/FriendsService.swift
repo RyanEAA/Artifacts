@@ -10,7 +10,7 @@ import FirebaseAuth
 import FirebaseFirestore
 
 /// Minimal display model for a user row.
-public struct FriendUser: Identifiable, Hashable {
+public struct FriendUser: Identifiable, Hashable, Codable {
     public let id: String      // uid
     public let username: String
     public let profilePictureURL: String?
@@ -22,6 +22,12 @@ final class FriendsService: ObservableObject {
     // MARK: - Firestore
 
     let db = Firestore.firestore()
+    private var cachedUsersByID: [String: FriendUser] = [:]
+    private let cacheKey = "Artifacts.cachedFriendUsers"
+
+    init() {
+        loadCachedUsers()
+    }
 
     /// Current user UID (throws if missing to prevent silent rule errors).
     private var uid: String {
@@ -111,12 +117,15 @@ final class FriendsService: ObservableObject {
     /// Resolve usernames for a list of UIDs (chunks of 10 for Firestore `in`).
     func fetchUsernames(for uids: [String]) async throws -> [FriendUser] {
         guard !uids.isEmpty else { return [] }
-        var result: [FriendUser] = []
-        for chunk in uids.chunked(into: 10) {
+        let normalized = Array(Set(uids))
+        let missingUIDs = normalized.filter { cachedUsersByID[$0] == nil }
+
+        var fetched: [FriendUser] = []
+        for chunk in missingUIDs.chunked(into: 10) {
             let snap = try await db.collection("users")
                 .whereField(FieldPath.documentID(), in: chunk)
                 .getDocuments()
-            result += snap.documents.map {
+            fetched += snap.documents.map {
                 FriendUser(
                     id: $0.documentID,
                     username: ($0.get("username") as? String) ?? $0.documentID,
@@ -124,7 +133,16 @@ final class FriendsService: ObservableObject {
                 )
             }
         }
-        return result
+
+        if !fetched.isEmpty {
+            store(users: fetched)
+        }
+
+        return normalized.compactMap { cachedUsersByID[$0] }
+    }
+
+    func cachedUsers(for uids: [String]) -> [FriendUser] {
+        Array(Set(uids)).compactMap { cachedUsersByID[$0] }
     }
 
     /// Case-insensitive prefix search by using **lowercase-only usernames**.
@@ -143,13 +161,15 @@ final class FriendsService: ObservableObject {
             .limit(to: limit)
             .getDocuments()
 
-        return snap.documents.map {
+        let users = snap.documents.map {
             FriendUser(
                 id: $0.documentID,
                 username: ($0.get("username") as? String) ?? $0.documentID,
                 profilePictureURL: ($0.get("profilePictureURL") as? String)
             )
         }
+        store(users: users)
+        return users
     }
 
     // MARK: - ACTIONS
@@ -271,6 +291,30 @@ final class FriendsService: ObservableObject {
                 }
                 onChange(rows)
             }
+    }
+}
+
+private extension FriendsService {
+    func store(users: [FriendUser]) {
+        for user in users {
+            cachedUsersByID[user.id] = user
+        }
+        persistCachedUsers()
+    }
+
+    func loadCachedUsers() {
+        guard
+            let data = UserDefaults.standard.data(forKey: cacheKey),
+            let users = try? JSONDecoder().decode([FriendUser].self, from: data)
+        else { return }
+
+        cachedUsersByID = Dictionary(uniqueKeysWithValues: users.map { ($0.id, $0) })
+    }
+
+    func persistCachedUsers() {
+        let users = Array(cachedUsersByID.values)
+        guard let data = try? JSONEncoder().encode(users) else { return }
+        UserDefaults.standard.set(data, forKey: cacheKey)
     }
 }
 

@@ -38,6 +38,7 @@ struct ArtifactMarkerOwner: Identifiable {
     let ownerUid: String
     let imageURL: String?
     let count: Int
+    let isRecent: Bool
 
     var id: String { ownerUid }
 }
@@ -113,16 +114,20 @@ struct ArtifactMarkerView: View {
                 .overlay(
                     Circle()
                         .stroke(
-                            Color("MintGreen").opacity(isSelected ? 0.92 : 0.55),
-                            lineWidth: isSelected ? 2 : 1
+                            owner.isRecent ? Color.white : Color("MintGreen").opacity(isSelected ? 0.92 : 0.55),
+                            lineWidth: owner.isRecent ? (isSelected ? 3 : 2.2) : (isSelected ? 2 : 1)
                         )
+                )
+                .shadow(
+                    color: owner.isRecent ? Color.white.opacity(isSelected ? 0.9 : 0.7) : .clear,
+                    radius: owner.isRecent ? (isSelected ? 6 : 4) : 0
                 )
 
             avatarBubble(urlString: owner.imageURL, size: innerSize)
         }
         .overlay(alignment: .topTrailing) {
             if owner.count > 1 {
-                countBadge(owner.count)
+                countBadge(owner.count, isRecent: owner.isRecent)
                     .offset(x: 6, y: -6)
             }
         }
@@ -157,15 +162,19 @@ struct ArtifactMarkerView: View {
             .foregroundColor(Color("MintGreen").opacity(0.92))
     }
 
-    private func countBadge(_ count: Int) -> some View {
+    private func countBadge(_ count: Int, isRecent: Bool) -> some View {
         let display = count > 99 ? "99+" : "\(count)"
         return Text(display)
             .font(.system(size: 9, weight: .bold))
-            .foregroundColor(.black.opacity(0.95))
+            .foregroundColor(isRecent ? .black.opacity(0.98) : .black.opacity(0.95))
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .fixedSize(horizontal: true, vertical: true)
-            .background(Color("MintGreen"))
+            .background(isRecent ? Color.white : Color("MintGreen"))
+            .overlay(
+                Capsule()
+                    .stroke(isRecent ? Color.black.opacity(0.22) : Color.clear, lineWidth: 0.8)
+            )
             .clipShape(Capsule())
     }
 }

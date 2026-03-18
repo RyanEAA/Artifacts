@@ -7,6 +7,7 @@
 
 import FirebaseAuth
 import Firebase
+import FirebaseFirestore
 
 @MainActor
 final class SessionManager: ObservableObject {
@@ -19,6 +20,7 @@ final class SessionManager: ObservableObject {
 
     private let db = Firestore.firestore()
     private var authListenerHandle: AuthStateDidChangeListenerHandle?
+    private var userListener: ListenerRegistration?
 
     init() {
         listen()
@@ -28,6 +30,7 @@ final class SessionManager: ObservableObject {
         if let handle = authListenerHandle {
             Auth.auth().removeStateDidChangeListener(handle)
         }
+        userListener?.remove()
     }
 
     func listen() {
@@ -42,9 +45,12 @@ final class SessionManager: ObservableObject {
                 self.isLoading = false
                 if let user {
                     NotificationService.shared.start(for: user.uid)
-                    self.fetchUserData(uid: user.uid)
+                    self.loadCachedUserData(uid: user.uid)
+                    self.listenToUserData(uid: user.uid)
                 } else {
                     NotificationService.shared.stop()
+                    self.userListener?.remove()
+                    self.userListener = nil
                     self.userData = nil
                     self.errorMessage = nil
                 }
@@ -126,7 +132,9 @@ final class SessionManager: ObservableObject {
                                 if let err {
                                     self.errorMessage = "Account created, but profile setup failed: \(err.localizedDescription)"
                                 } else {
-                                    self.fetchUserData(uid: user.uid)
+                                    self.userData = userDoc
+                                    self.persistUserData(userDoc, uid: user.uid)
+                                    self.listenToUserData(uid: user.uid)
                                 }
                             }
                         }
@@ -165,6 +173,8 @@ final class SessionManager: ObservableObject {
         do {
             try Auth.auth().signOut()
             NotificationService.shared.stop()
+            userListener?.remove()
+            userListener = nil
             user = nil
             userData = nil
             errorMessage = nil
@@ -173,16 +183,112 @@ final class SessionManager: ObservableObject {
         }
     }
 
-    private func fetchUserData(uid: String) {
-        db.collection("users").document(uid).getDocument { [weak self] snapshot, error in
-            guard let self else { return }
-            Task { @MainActor in
-                if let data = snapshot?.data() {
-                    self.userData = data
-                } else if let error {
-                    print("Error fetching user data: \(error.localizedDescription)")
+    func updateUsername(to rawUsername: String) async throws {
+        guard let uid = user?.uid else {
+            throw NSError(domain: "SessionManager", code: 401, userInfo: [
+                NSLocalizedDescriptionKey: "You must be signed in to update your username."
+            ])
+        }
+
+        let normalized = rawUsername.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if let validationError = validateUsername(normalized) {
+            throw NSError(domain: "SessionManager", code: 400, userInfo: [
+                NSLocalizedDescriptionKey: validationError
+            ])
+        }
+
+        let existing = try await db.collection("users")
+            .whereField("username", isEqualTo: normalized)
+            .limit(to: 1)
+            .getDocuments()
+
+        if let takenDoc = existing.documents.first, takenDoc.documentID != uid {
+            throw NSError(domain: "SessionManager", code: 409, userInfo: [
+                NSLocalizedDescriptionKey: "Username is already taken."
+            ])
+        }
+
+        try await db.collection("users").document(uid).setData([
+            "username": normalized,
+            "lastActive": Timestamp()
+        ], merge: true)
+
+        var updated = userData ?? [:]
+        updated["username"] = normalized
+        userData = updated
+        persistUserData(updated, uid: uid)
+    }
+
+    func deleteCurrentAccount() async throws {
+        guard let firebaseUser = Auth.auth().currentUser else {
+            throw NSError(domain: "SessionManager", code: 401, userInfo: [
+                NSLocalizedDescriptionKey: "You must be signed in to delete your account."
+            ])
+        }
+
+        let uid = firebaseUser.uid
+        try await firebaseUser.delete()
+
+        UserDefaults.standard.removeObject(forKey: cacheKey(for: uid))
+        NotificationService.shared.stop()
+        userListener?.remove()
+        userListener = nil
+        user = nil
+        userData = nil
+        errorMessage = nil
+    }
+
+    private func listenToUserData(uid: String) {
+        userListener?.remove()
+        userListener = db.collection("users").document(uid)
+            .addSnapshotListener { [weak self] snapshot, error in
+                guard let self else { return }
+                Task { @MainActor in
+                    if let data = snapshot?.data() {
+                        self.userData = data
+                        self.persistUserData(data, uid: uid)
+                    } else if let error {
+                        print("Error fetching user data: \(error.localizedDescription)")
+                    }
                 }
             }
+    }
+
+    private func loadCachedUserData(uid: String) {
+        guard
+            let cached = UserDefaults.standard.data(forKey: cacheKey(for: uid)),
+            let payload = try? JSONDecoder().decode(CachedUserProfile.self, from: cached)
+        else { return }
+
+        userData = payload.asDictionary
+    }
+
+    private func persistUserData(_ data: [String: Any], uid: String) {
+        let payload = CachedUserProfile(
+            username: data["username"] as? String,
+            email: data["email"] as? String,
+            profilePictureURL: data["profilePictureURL"] as? String
+        )
+        guard let encoded = try? JSONEncoder().encode(payload) else { return }
+        UserDefaults.standard.set(encoded, forKey: cacheKey(for: uid))
+    }
+
+    private func cacheKey(for uid: String) -> String {
+        "Artifacts.cachedUserData.\(uid)"
+    }
+
+    private struct CachedUserProfile: Codable {
+        let username: String?
+        let email: String?
+        let profilePictureURL: String?
+
+        var asDictionary: [String: Any] {
+            var result: [String: Any] = [:]
+            if let username { result["username"] = username }
+            if let email { result["email"] = email }
+            if let profilePictureURL { result["profilePictureURL"] = profilePictureURL }
+            return result
         }
     }
 

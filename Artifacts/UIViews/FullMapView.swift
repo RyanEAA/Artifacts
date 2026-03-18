@@ -19,25 +19,11 @@ struct FullMapView: View {
 
     @State private var selectedClusterID: String?
     @State private var selectedArtifact: ArtifactMapItem?
-
-    private var mapRegionBinding: Binding<MKCoordinateRegion> {
-        Binding(
-            get: { region },
-            set: { newValue in
-                DispatchQueue.main.async {
-                    region = newValue
-                }
-            }
-        )
-    }
-
-    private var clusters: [ArtifactCluster] {
-        ArtifactMapClusterer.makeClusters(items: artifacts)
-    }
+    @State private var clusteredArtifacts: [ArtifactCluster] = []
 
     var body: some View {
         ZStack {
-            Map(coordinateRegion: mapRegionBinding, annotationItems: clusters) { cluster in
+            Map(coordinateRegion: $region, annotationItems: clusteredArtifacts) { cluster in
                 MapAnnotation(coordinate: cluster.coordinate) {
                     ArtifactMarkerView(
                         owners: markerOwners(for: cluster),
@@ -128,9 +114,13 @@ struct FullMapView: View {
             }
         }
         .onAppear {
+            clusteredArtifacts = ArtifactMapClusterer.makeClusters(items: artifacts)
             if let first = artifacts.first {
                 region.center = first.coordinate
             }
+        }
+        .onChange(of: artifacts) { newValue in
+            clusteredArtifacts = ArtifactMapClusterer.makeClusters(items: newValue)
         }
     }
 
@@ -161,11 +151,15 @@ struct FullMapView: View {
     }
 
     private func markerOwners(for cluster: ArtifactCluster) -> [ArtifactMarkerOwner] {
-        cluster.ownerArtifactCounts.map { bucket in
+        let recentCutoff = Date().addingTimeInterval(-86_400)
+        return cluster.ownerArtifactCounts.map { bucket in
             ArtifactMarkerOwner(
                 ownerUid: bucket.ownerUid,
                 imageURL: ownerAvatarURLs[bucket.ownerUid],
-                count: bucket.count
+                count: bucket.count,
+                isRecent: cluster.items.contains { item in
+                    item.ownerUid == bucket.ownerUid && item.createdAt >= recentCutoff
+                }
             )
         }
     }
