@@ -78,6 +78,7 @@ class SceneManager: ObservableObject {
     var fallbackRestoredAnnotationArtifactIds: Set<String> = []
     var loadVisibleModelRecords: [ModelArtifactRecord] = []
     var loadVisibleAnnotationArtifactIDs: Set<String> = []
+    var loadVisibleAnnotationOwnerUIDs: [String: String] = [:]
     var isLoadArtifactFilterActive: Bool = false
     var modelAnchorEntitiesByArtifactId: [String: AnchorEntity] = [:]
     var fallbackModelEntitiesByArtifactId: [String: Entity] = [:]
@@ -92,6 +93,7 @@ class SceneManager: ObservableObject {
     @Published var persistenceProgressText: String = ""
     @Published var persistenceNotice: PersistenceNotice?
     @Published var isAwaitingVisibleArtifactsAfterLoad: Bool = false
+    var onVisibleArtifactsReady: (() -> Void)?
     private var persistenceNoticeWorkItem: DispatchWorkItem?
     private var loadVisibilityTimeoutWorkItem: DispatchWorkItem?
     private var expectedRestoredModelCount: Int = 0
@@ -174,6 +176,7 @@ class SceneManager: ObservableObject {
     func resetLoadArtifactFilters() {
         loadVisibleModelRecords = []
         loadVisibleAnnotationArtifactIDs = []
+        loadVisibleAnnotationOwnerUIDs = [:]
         annotationColorOverrides = [:]
         isLoadArtifactFilterActive = false
     }
@@ -237,7 +240,11 @@ class SceneManager: ObservableObject {
             guard self.isAwaitingVisibleArtifactsAfterLoad else { return }
             self.loadVisibilityTimeoutWorkItem?.cancel()
             self.loadVisibilityTimeoutWorkItem = nil
+            self.anchorEntities.forEach { $0.isEnabled = true }
+            self.drawAnchorEntity?.isEnabled = true
+            self.fallbackArtifactAnchorEntity?.isEnabled = true
             self.isAwaitingVisibleArtifactsAfterLoad = false
+            self.onVisibleArtifactsReady?()
             self.resetLoadArtifactFilters()
             self.endPersistenceProgress()
             self.postPersistenceNotice("Scene loaded and artifacts restored.", style: .success)
@@ -249,7 +256,11 @@ class SceneManager: ObservableObject {
             self.loadVisibilityTimeoutWorkItem?.cancel()
             let workItem = DispatchWorkItem { [weak self] in
                 guard let self = self, self.isAwaitingVisibleArtifactsAfterLoad else { return }
+                self.anchorEntities.forEach { $0.isEnabled = true }
+                self.drawAnchorEntity?.isEnabled = true
+                self.fallbackArtifactAnchorEntity?.isEnabled = true
                 self.isAwaitingVisibleArtifactsAfterLoad = false
+                self.onVisibleArtifactsReady?()
                 self.resetLoadArtifactFilters()
                 self.endPersistenceProgress()
                 self.postPersistenceNotice(

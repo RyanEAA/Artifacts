@@ -44,6 +44,17 @@ struct ARViewContainer: UIViewRepresentable {
         )
         
         sceneManager.arView = arView
+        sceneManager.onVisibleArtifactsReady = { [weak arView, weak sceneManager] in
+            guard let arView, let sceneManager else { return }
+
+            for view in sceneManager.annotationViews.values {
+                arView.bringSubviewToFront(view)
+            }
+            for label in sceneManager.artifactOwnerBadgeViews.values {
+                arView.bringSubviewToFront(label)
+            }
+            self.layoutAnnotations(on: arView)
+        }
         if let currentUid = Auth.auth().currentUser?.uid {
             prefetchOwnerUsernameIfNeeded(ownerUid: currentUid)
         }
@@ -117,6 +128,7 @@ struct ARViewContainer: UIViewRepresentable {
     static func dismantleUIView(_ uiView: CustomARView, coordinator: Coordinator) {
         uiView.session.pause()
         coordinator.parent.sceneManager.stopAnnotationTextListener()
+        coordinator.parent.sceneManager.onVisibleArtifactsReady = nil
         NotificationCenter.default.removeObserver(uiView, name: .pauseARSession, object: nil)
         NotificationCenter.default.removeObserver(uiView, name: .resumeARSession, object: nil)
     }

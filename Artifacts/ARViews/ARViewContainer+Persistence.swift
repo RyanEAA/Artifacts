@@ -272,6 +272,9 @@ extension ARViewContainer {
                             self.preloadModelEntities(named: modelNames)
                             self.sceneManager.loadVisibleModelRecords = modelRecords
                             self.sceneManager.loadVisibleAnnotationArtifactIDs = Set(annotationRecords.map(\.artifactId))
+                            self.sceneManager.loadVisibleAnnotationOwnerUIDs = Dictionary(
+                                uniqueKeysWithValues: annotationRecords.map { ($0.artifactId, $0.ownerUid) }
+                            )
                             self.sceneManager.annotationColorOverrides = Dictionary(
                                 uniqueKeysWithValues: annotationRecords.compactMap { record in
                                     guard let colorHex = record.annotationColorHex, !colorHex.isEmpty else { return nil }
@@ -319,6 +322,9 @@ extension ARViewContainer {
                         self.sceneManager.selectedCloudSceneStoragePath = storagePath
                         self.sceneManager.loadVisibleModelRecords = modelRecords
                         self.sceneManager.loadVisibleAnnotationArtifactIDs = Set(annotationRecords.map(\.artifactId))
+                        self.sceneManager.loadVisibleAnnotationOwnerUIDs = Dictionary(
+                            uniqueKeysWithValues: annotationRecords.map { ($0.artifactId, $0.ownerUid) }
+                        )
                         self.sceneManager.annotationColorOverrides = Dictionary(
                             uniqueKeysWithValues: annotationRecords.compactMap { record in
                                 guard let colorHex = record.annotationColorHex, !colorHex.isEmpty else { return nil }
@@ -385,6 +391,7 @@ extension ARViewContainer {
             return existing
         }
         let anchor = AnchorEntity(world: .zero)
+        anchor.isEnabled = !self.sceneManager.isAwaitingVisibleArtifactsAfterLoad
         arView.scene.addAnchor(anchor)
         self.sceneManager.fallbackArtifactAnchorEntity = anchor
         return anchor

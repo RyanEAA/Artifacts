@@ -52,6 +52,7 @@ extension ARViewContainer {
            let displayName = Auth.auth().currentUser?.displayName,
            !displayName.isEmpty {
             self.sceneManager.artifactOwnerUsernames[ownerUid] = displayName
+            self.refreshOwnerBadgeLabels(for: ownerUid)
             return
         }
         guard !self.sceneManager.artifactOwnerUsernameLookupsInFlight.contains(ownerUid) else { return }
@@ -63,9 +64,100 @@ extension ARViewContainer {
                 self.sceneManager.artifactOwnerUsernameLookupsInFlight.remove(ownerUid)
                 if let username = username, !username.isEmpty {
                     self.sceneManager.artifactOwnerUsernames[ownerUid] = username
+                    self.refreshOwnerBadgeLabels(for: ownerUid)
                 }
             }
         }
+    }
+
+    private func refreshOwnerBadgeLabels(for ownerUid: String) {
+        for (artifactId, storedOwnerUid) in self.sceneManager.artifactOwnerBadgeOwnerUids where storedOwnerUid == ownerUid {
+            guard let label = self.sceneManager.artifactOwnerBadgeViews[artifactId] else { continue }
+            self.configureOwnerBadgeLabel(label, ownerUid: ownerUid)
+        }
+    }
+
+    private func ownerBadgeFallbackText(for ownerUid: String) -> String {
+        if ownerUid == Auth.auth().currentUser?.uid {
+            if let displayName = Auth.auth().currentUser?.displayName,
+               !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return displayName
+            }
+            return "You"
+        }
+        return "friend"
+    }
+
+    private func ownerBadgeText(for ownerUid: String) -> String {
+        if let username = self.sceneManager.artifactOwnerUsernames[ownerUid], !username.isEmpty {
+            return "@\(username)"
+        }
+        return ownerBadgeFallbackText(for: ownerUid)
+    }
+
+    private func configureOwnerBadgeLabel(_ label: UILabel, ownerUid: String) {
+        let text = ownerBadgeText(for: ownerUid)
+        label.text = text.isEmpty ? nil : text
+        label.sizeToFit()
+        label.bounds = CGRect(
+            x: 0,
+            y: 0,
+            width: max(44, label.bounds.width + 10),
+            height: 18
+        )
+    }
+
+    func removeArtifactOwnerBadge(artifactId: String) {
+        self.sceneManager.artifactOwnerBadgeViews[artifactId]?.removeFromSuperview()
+        self.sceneManager.artifactOwnerBadgeViews[artifactId] = nil
+        self.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = nil
+        self.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = nil
+        self.sceneManager.artifactOwnerBadgeOwnerUids[artifactId] = nil
+    }
+
+    private func firstModelEntity(in entity: Entity) -> ModelEntity? {
+        if let modelEntity = entity as? ModelEntity {
+            return modelEntity
+        }
+        for child in entity.children {
+            if let found = firstModelEntity(in: child) {
+                return found
+            }
+        }
+        return nil
+    }
+
+    private func liveOwnerBadgePlacement(for artifactId: String) -> (worldPosition: SIMD3<Float>, yOffset: CGFloat)? {
+        if let anchorEntity = self.sceneManager.modelAnchorEntitiesByArtifactId[artifactId],
+           anchorEntity.scene != nil,
+           let modelEntity = firstModelEntity(in: anchorEntity) {
+            return (self.modelBadgeWorldPosition(for: modelEntity), -8)
+        }
+
+        if let fallbackEntity = self.sceneManager.fallbackModelEntitiesByArtifactId[artifactId],
+           fallbackEntity.parent != nil,
+           let modelEntity = firstModelEntity(in: fallbackEntity) {
+            return (self.modelBadgeWorldPosition(for: modelEntity), -8)
+        }
+
+        if let annotationId = UUID(uuidString: artifactId),
+           let anchor = self.sceneManager.annotationAnchors[annotationId] {
+            let pos = SIMD3<Float>(
+                anchor.transform.columns.3.x,
+                anchor.transform.columns.3.y,
+                anchor.transform.columns.3.z
+            )
+            let yOffset = self.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] ?? -84
+            return (pos, yOffset)
+        }
+
+        if let stroke = self.sceneManager.drawingManager.strokeGroups.first(where: { $0.artifactId == artifactId }),
+           let firstPoint = stroke.points.first {
+            let yOffset = self.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] ?? -28
+            return (firstPoint, yOffset)
+        }
+
+        return nil
     }
 
     func startRealtimeAnnotationSyncIfNeeded(on arView: ARView) {
@@ -222,7 +314,12 @@ extension ARViewContainer {
         self.sceneManager.isEditing[data.id] = false
         let hasText = !data.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         self.sceneManager.hasBeenTapped[data.id] = hasText
-        animatePopIn(tv)
+        if self.sceneManager.isAwaitingVisibleArtifactsAfterLoad {
+            tv.alpha = 1
+            tv.isHidden = true
+        } else {
+            animatePopIn(tv)
+        }
         self.sceneManager.markRestoredAnnotationIfAwaiting()
     }
 
@@ -240,12 +337,13 @@ extension ARViewContainer {
                 if let tv = self.sceneManager.annotationViews[id] {
                     let cameraSpace = simd_mul(worldToCamera, SIMD4<Float>(pos.x, pos.y, pos.z, 1))
                     let isInFrontOfCamera = cameraSpace.z < 0
-                    tv.isHidden = !isInFrontOfCamera
+                    let shouldKeepHidden = self.sceneManager.isAwaitingVisibleArtifactsAfterLoad
+                    tv.isHidden = shouldKeepHidden || !isInFrontOfCamera
                     tv.bounds.size = CGSize(width: annotationWidth, height: annotationHeight)
                     tv.center = CGPoint(x: CGFloat(p.x), y: CGFloat(p.y) - 20)
 
                     if let btn = self.sceneManager.deleteButtons[id] {
-                        let shouldShowDelete = isInFrontOfCamera && self.shouldShowDeleteButton(for: id)
+                        let shouldShowDelete = !shouldKeepHidden && isInFrontOfCamera && self.shouldShowDeleteButton(for: id)
                         btn.isHidden = !shouldShowDelete
                         if shouldShowDelete {
                             let f = tv.frame
@@ -304,22 +402,8 @@ extension ARViewContainer {
 
         self.sceneManager.artifactOwnerBadgeOwnerUids[artifactId] = ownerUid
         self.prefetchOwnerUsernameIfNeeded(ownerUid: ownerUid)
-
-        if let username = self.sceneManager.artifactOwnerUsernames[ownerUid], !username.isEmpty {
-            label.text = "@\(username)"
-            label.isHidden = false
-        } else {
-            // Avoid flashing "@unknown"; show once username resolves.
-            label.text = nil
-            label.isHidden = true
-        }
-        label.sizeToFit()
-        label.bounds = CGRect(
-            x: 0,
-            y: 0,
-            width: max(44, label.bounds.width + 10),
-            height: 18
-        )
+        configureOwnerBadgeLabel(label, ownerUid: ownerUid)
+        label.isHidden = false
 
         self.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = worldPosition
         self.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = yOffset
@@ -330,21 +414,27 @@ extension ARViewContainer {
         guard let frame = arView.session.currentFrame else { return }
         let worldToCamera = simd_inverse(frame.camera.transform)
 
+        var staleArtifactIds: [String] = []
+
         for (artifactId, label) in self.sceneManager.artifactOwnerBadgeViews {
-            guard let worldPos = self.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] else {
-                label.isHidden = true
+            guard let placement = self.liveOwnerBadgePlacement(for: artifactId) else {
+                staleArtifactIds.append(artifactId)
                 continue
             }
+            let worldPos = placement.worldPosition
+            self.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = worldPos
+            self.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = placement.yOffset
 
             if let ownerUid = self.sceneManager.artifactOwnerBadgeOwnerUids[artifactId],
-               (label.text == nil || label.text?.isEmpty == true) {
+               (label.text == nil || label.text?.isEmpty == true || label.text == ownerBadgeFallbackText(for: ownerUid)) {
                 resolveOwnerUsernameIfNeeded(ownerUid: ownerUid, for: label)
+                configureOwnerBadgeLabel(label, ownerUid: ownerUid)
             }
 
             if let p = arView.project(worldPos) {
                 let cameraSpace = simd_mul(worldToCamera, SIMD4<Float>(worldPos.x, worldPos.y, worldPos.z, 1))
                 let isInFrontOfCamera = cameraSpace.z < 0
-                label.isHidden = !isInFrontOfCamera || label.text == nil
+                label.isHidden = self.sceneManager.isAwaitingVisibleArtifactsAfterLoad || !isInFrontOfCamera || label.text == nil
                 if isInFrontOfCamera {
                     let yOffset = self.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] ?? -36
                     label.center = CGPoint(
@@ -357,14 +447,14 @@ extension ARViewContainer {
                 label.isHidden = true
             }
         }
+
+        staleArtifactIds.forEach { self.removeArtifactOwnerBadge(artifactId: $0) }
     }
 
     private func resolveOwnerUsernameIfNeeded(ownerUid: String, for label: UILabel) {
         guard !ownerUid.isEmpty else { return }
         if let cached = self.sceneManager.artifactOwnerUsernames[ownerUid] {
-            label.text = "@\(cached)"
-            label.sizeToFit()
-            label.bounds.size.width = max(44, label.bounds.width + 10)
+            configureOwnerBadgeLabel(label, ownerUid: ownerUid)
             return
         }
         self.prefetchOwnerUsernameIfNeeded(ownerUid: ownerUid)

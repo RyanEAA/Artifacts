@@ -114,13 +114,9 @@ struct ArtifactMarkerView: View {
                 .overlay(
                     Circle()
                         .stroke(
-                            owner.isRecent ? Color.white : Color("MintGreen").opacity(isSelected ? 0.92 : 0.55),
-                            lineWidth: owner.isRecent ? (isSelected ? 3 : 2.2) : (isSelected ? 2 : 1)
+                            owner.isRecent ? Color.white.opacity(isSelected ? 0.92 : 0.55) : Color("MintGreen").opacity(isSelected ? 0.92 : 0.55),
+                            lineWidth: isSelected ? 2 : 1
                         )
-                )
-                .shadow(
-                    color: owner.isRecent ? Color.white.opacity(isSelected ? 0.9 : 0.7) : .clear,
-                    radius: owner.isRecent ? (isSelected ? 6 : 4) : 0
                 )
 
             avatarBubble(urlString: owner.imageURL, size: innerSize)
@@ -173,7 +169,7 @@ struct ArtifactMarkerView: View {
             .background(isRecent ? Color.white : Color("MintGreen"))
             .overlay(
                 Capsule()
-                    .stroke(isRecent ? Color.black.opacity(0.22) : Color.clear, lineWidth: 0.8)
+                    .stroke(Color.clear, lineWidth: 0.8)
             )
             .clipShape(Capsule())
     }

@@ -69,7 +69,10 @@ extension ARViewContainer {
                         if let colorHex = parent.sceneManager.annotationColorOverrides[data.id.uuidString] {
                             data.colorHex = colorHex
                         }
-                        let ownerUid = parent.sceneManager.selectedSceneOwnerUid ?? Auth.auth().currentUser?.uid ?? ""
+                        let ownerUid = parent.sceneManager.loadVisibleAnnotationOwnerUIDs[data.id.uuidString]
+                            ?? parent.sceneManager.selectedSceneOwnerUid
+                            ?? Auth.auth().currentUser?.uid
+                            ?? ""
                         let pos = SIMD3<Float>(
                             anchor.transform.columns.3.x,
                             anchor.transform.columns.3.y,
@@ -350,11 +353,7 @@ extension ARViewContainer {
                     self.parent.sceneManager.fallbackRestoredAnnotationArtifactIds.remove(artifactId)
                 }
 
-                self.parent.sceneManager.artifactOwnerBadgeViews[artifactId]?.removeFromSuperview()
-                self.parent.sceneManager.artifactOwnerBadgeViews[artifactId] = nil
-                self.parent.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = nil
-                self.parent.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = nil
-                self.parent.sceneManager.artifactOwnerBadgeOwnerUids[artifactId] = nil
+                self.parent.removeArtifactOwnerBadge(artifactId: artifactId)
             }
 
             notificationObservers.append(delete)

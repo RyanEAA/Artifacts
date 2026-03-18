@@ -238,16 +238,21 @@ extension ARViewContainer {
 
         let anchorEntity = AnchorEntity(.anchor(identifier: anchor.identifier))
         anchorEntity.addChild(clonedEntity)
+        anchorEntity.isEnabled = !self.sceneManager.isAwaitingVisibleArtifactsAfterLoad
 
         arView.scene.addAnchor(anchorEntity)
 
-        // Animate to correct scale
-        clonedEntity.move(
-            to: Transform(scale: finalScale),
-            relativeTo: clonedEntity.parent,
-            duration: 0.2,
-            timingFunction: .easeOut
-        )
+        if self.sceneManager.isAwaitingVisibleArtifactsAfterLoad {
+            clonedEntity.scale = finalScale
+        } else {
+            // Animate to correct scale for live placements.
+            clonedEntity.move(
+                to: Transform(scale: finalScale),
+                relativeTo: clonedEntity.parent,
+                duration: 0.2,
+                timingFunction: .easeOut
+            )
+        }
 
         self.sceneManager.anchorEntities.append(anchorEntity)
         return (clonedEntity, anchorEntity)

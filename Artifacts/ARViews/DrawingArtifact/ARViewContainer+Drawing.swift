@@ -214,11 +214,7 @@ extension ARViewContainer {
         self.sceneManager.drawAnchorEntity = nil
         self.sceneManager.drawingBeadPrototypeCache.removeAll(keepingCapacity: true)
         for artifactId in drawingArtifactIds {
-            self.sceneManager.artifactOwnerBadgeViews[artifactId]?.removeFromSuperview()
-            self.sceneManager.artifactOwnerBadgeViews[artifactId] = nil
-            self.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = nil
-            self.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = nil
-            self.sceneManager.artifactOwnerBadgeOwnerUids[artifactId] = nil
+            self.removeArtifactOwnerBadge(artifactId: artifactId)
         }
     }
 
@@ -253,6 +249,7 @@ extension ARViewContainer {
                                 arView.scene.addAnchor(anchor)
                                 self.sceneManager.drawAnchorEntity = anchor
                             }
+                            self.sceneManager.drawAnchorEntity?.isEnabled = !self.sceneManager.isAwaitingVisibleArtifactsAfterLoad
                             self.sceneManager.drawAnchorEntity!.addChild(bead)
                             beads.append(bead)
                         }
@@ -382,11 +379,7 @@ extension ARViewContainer.Coordinator {
         ) { [weak self] _ in
             guard let self = self else { return }
             if let artifactId = self.parent.sceneManager.drawingManager.undoLastStroke(in: arView.scene) {
-                self.parent.sceneManager.artifactOwnerBadgeViews[artifactId]?.removeFromSuperview()
-                self.parent.sceneManager.artifactOwnerBadgeViews[artifactId] = nil
-                self.parent.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = nil
-                self.parent.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = nil
-                self.parent.sceneManager.artifactOwnerBadgeOwnerUids[artifactId] = nil
+                self.parent.removeArtifactOwnerBadge(artifactId: artifactId)
             }
         }
         let clear = NotificationCenter.default.addObserver(
@@ -404,11 +397,7 @@ extension ARViewContainer.Coordinator {
             guard let self = self else { return }
             guard let artifactId = notification.object as? String else { return }
             if self.parent.sceneManager.drawingManager.removeStroke(artifactId: artifactId, in: arView.scene) {
-                self.parent.sceneManager.artifactOwnerBadgeViews[artifactId]?.removeFromSuperview()
-                self.parent.sceneManager.artifactOwnerBadgeViews[artifactId] = nil
-                self.parent.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = nil
-                self.parent.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = nil
-                self.parent.sceneManager.artifactOwnerBadgeOwnerUids[artifactId] = nil
+                self.parent.removeArtifactOwnerBadge(artifactId: artifactId)
             }
         }
         notificationObservers.append(contentsOf: [undo, clear, deleteArtifact])
