@@ -10,6 +10,7 @@ struct ContentView: View {
     @EnvironmentObject var placementSettings: PlacementSettings
     @EnvironmentObject var modelsViewModel: ModelsViewModel
     @EnvironmentObject var modelDeletionManager: ModelDeletionManager
+    @EnvironmentObject var sceneManager: SceneManager
 
     @State private var selectedControlMode: Int = 0
     @State private var isControlsVisible: Bool = true
@@ -28,7 +29,11 @@ struct ContentView: View {
             case .draw:
                 DrawingToolbarView()
             default:
-                if self.modelDeletionManager.entitySelectedForDeletion != nil {
+                if sceneManager.activeAnnotationEditingId != nil {
+                    AnnotationToolbarView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .padding(.top, 24)
+                } else if self.modelDeletionManager.entitySelectedForDeletion != nil {
                     DeletionView()
                 } else {
                     ControlView(selectedControlMode: $selectedControlMode, isControlsVisible: $isControlsVisible, showBrowse: $showBrowse, showSettings: $showSettings)

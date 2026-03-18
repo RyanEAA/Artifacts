@@ -46,6 +46,7 @@ struct AnnotationArtifactRecord {
     let artifactId: String
     let ownerUid: String
     let annotationText: String
+    let annotationColorHex: String?
     let transform: simd_float4x4
 }
 
@@ -436,6 +437,7 @@ final class ArtifactsService {
     func createAnnotationArtifact(
         artifactId: String,
         annotationText: String,
+        annotationColorHex: String?,
         sceneId: String,
         transform: simd_float4x4,
         coordinate: CLLocationCoordinate2D? = nil
@@ -455,6 +457,7 @@ final class ArtifactsService {
             "sceneId": sceneId,
             "type": "annotation",
             "annotationText": annotationText,
+            "annotationColorHex": annotationColorHex as Any,
             "published": false,
             "position": position,
             "transform": transformArray,
@@ -477,6 +480,17 @@ final class ArtifactsService {
     ) async throws {
         let patch: [String: Any] = [
             "annotationText": annotationText,
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        try await db.collection("artifacts").document(artifactId).setData(patch, merge: true)
+    }
+
+    func updateAnnotationColor(
+        artifactId: String,
+        annotationColorHex: String?
+    ) async throws {
+        let patch: [String: Any] = [
+            "annotationColorHex": annotationColorHex as Any,
             "updatedAt": FieldValue.serverTimestamp()
         ]
         try await db.collection("artifacts").document(artifactId).setData(patch, merge: true)
@@ -785,11 +799,13 @@ final class ArtifactsService {
             let published = data["published"] as? Bool
             guard published != false else { return nil }
             let text = (data["annotationText"] as? String) ?? ""
+            let colorHex = data["annotationColorHex"] as? String
             guard let transform = Self.transformMatrix(from: data["transform"]) else { return nil }
             return AnnotationArtifactRecord(
                 artifactId: doc.documentID,
                 ownerUid: data["ownerUid"] as? String ?? ownerUid,
                 annotationText: text,
+                annotationColorHex: colorHex,
                 transform: transform
             )
         }

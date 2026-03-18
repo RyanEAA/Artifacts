@@ -66,6 +66,9 @@ extension ARViewContainer {
                         if let override = parent.sceneManager.annotationTextOverrides[data.id.uuidString] {
                             data.text = override
                         }
+                        if let colorHex = parent.sceneManager.annotationColorOverrides[data.id.uuidString] {
+                            data.colorHex = colorHex
+                        }
                         let ownerUid = parent.sceneManager.selectedSceneOwnerUid ?? Auth.auth().currentUser?.uid ?? ""
                         let pos = SIMD3<Float>(
                             anchor.transform.columns.3.x,
@@ -171,6 +174,10 @@ extension ARViewContainer {
             parent.sceneManager.annotationAnchors[id] = nil
             parent.sceneManager.isEditing[id]         = nil
             parent.sceneManager.hasBeenTapped[id]     = nil
+            parent.sceneManager.annotationColors[id]  = nil
+            if parent.sceneManager.activeAnnotationEditingId == id {
+                parent.sceneManager.clearActiveAnnotationEditingState()
+            }
             let artifactId = id.uuidString
             parent.sceneManager.artifactOwnerBadgeViews[artifactId]?.removeFromSuperview()
             parent.sceneManager.artifactOwnerBadgeViews[artifactId] = nil
@@ -194,11 +201,20 @@ extension ARViewContainer {
             // 1) Tap hits an existing annotation → enter edit mode
             for (id, tv) in parent.sceneManager.annotationViews {
                 if tv.frame.contains(location) {
+                    if let activeId = parent.sceneManager.activeAnnotationEditingId, activeId != id {
+                        _ = finishActiveAnnotationEditingIfNeeded(on: arView)
+                    }
                     parent.sceneManager.isEditing[id] = true
+                    parent.sceneManager.activeAnnotationEditingId = id
+                    let selectedColor = parent.sceneManager.annotationColor(for: id)
+                    parent.sceneManager.activeAnnotationColor = selectedColor
                     tv.isUserInteractionEnabled = true
                     tv.isEditable = true
-                    tv.layer.borderWidth = 2
-                    tv.layer.borderColor = UIColor.systemBlue.cgColor
+                    parent.sceneManager.applyAnnotationStyle(
+                        to: tv,
+                        color: selectedColor,
+                        isEditing: true
+                    )
                     if parent.sceneManager.hasBeenTapped[id] == false {
                         tv.text = ""
                         parent.sceneManager.hasBeenTapped[id] = true
@@ -210,36 +226,7 @@ extension ARViewContainer {
             }
 
             // 2) Some annotation is currently editing → end editing
-            if let editingId = parent.sceneManager.isEditing.first(where: { $0.value })?.key {
-                parent.sceneManager.isEditing[editingId] = false
-                if let tv = parent.sceneManager.annotationViews[editingId] {
-                    tv.isEditable = false
-                    tv.layer.borderWidth = 0
-                    tv.isUserInteractionEnabled = false
-                    tv.resignFirstResponder()
-
-                    let trimmed = tv.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if trimmed.isEmpty {
-                        tv.text = "Tap to Edit"
-                        parent.sceneManager.hasBeenTapped[editingId] = false
-                        parent.showDeleteButton(for: editingId, on: arView)
-                    } else {
-                        parent.hideDeleteButton(for: editingId)
-                        if let oldAnchor = parent.sceneManager.annotationAnchors[editingId] {
-                            let transform = oldAnchor.transform
-                            let payload = ARViewContainer.AnnotationData(
-                                id: editingId,
-                                text: tv.text
-                            )
-                            let name = annotationNamePrefix + parent.encodeAnnotation(payload)
-                            let newAnchor = ARAnchor(name: name, transform: transform)
-                            arView.session.add(anchor: newAnchor)
-                            arView.session.remove(anchor: oldAnchor)
-                            parent.sceneManager.annotationAnchors[editingId] = newAnchor
-                        }
-                    }
-                    parent.updateAnnotationTextInFirestore(annotationId: editingId, text: trimmed)
-                }
+            if finishActiveAnnotationEditingIfNeeded(on: arView) {
                 return
             }
 
@@ -250,6 +237,54 @@ extension ARViewContainer {
             case .model, .draw, .none:
                 return
             }
+        }
+
+        @discardableResult
+        func finishActiveAnnotationEditingIfNeeded(on arView: ARView) -> Bool {
+            guard let editingId = parent.sceneManager.activeAnnotationEditingId
+                ?? parent.sceneManager.isEditing.first(where: { $0.value })?.key else {
+                return false
+            }
+
+            parent.sceneManager.isEditing[editingId] = false
+            if let tv = parent.sceneManager.annotationViews[editingId] {
+                tv.isEditable = false
+                tv.isUserInteractionEnabled = false
+                tv.resignFirstResponder()
+                parent.sceneManager.applyAnnotationStyle(
+                    to: tv,
+                    color: parent.sceneManager.annotationColor(for: editingId),
+                    isEditing: false
+                )
+
+                let trimmed = tv.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty {
+                    tv.text = "Tap to Edit"
+                    parent.sceneManager.hasBeenTapped[editingId] = false
+                    parent.showDeleteButton(for: editingId, on: arView)
+                } else {
+                    parent.hideDeleteButton(for: editingId)
+                }
+
+                if let oldAnchor = parent.sceneManager.annotationAnchors[editingId] {
+                    let transform = oldAnchor.transform
+                    let payload = ARViewContainer.AnnotationData(
+                        id: editingId,
+                        text: trimmed.isEmpty ? "" : tv.text,
+                        colorHex: parent.annotationColorHex(
+                            from: parent.sceneManager.annotationColor(for: editingId)
+                        )
+                    )
+                    let name = annotationNamePrefix + parent.encodeAnnotation(payload)
+                    let newAnchor = ARAnchor(name: name, transform: transform)
+                    arView.session.add(anchor: newAnchor)
+                    arView.session.remove(anchor: oldAnchor)
+                    parent.sceneManager.annotationAnchors[editingId] = newAnchor
+                }
+                parent.updateAnnotationTextInFirestore(annotationId: editingId, text: trimmed)
+            }
+            parent.sceneManager.clearActiveAnnotationEditingState()
+            return true
         }
 
         // MARK: - UITextViewDelegate
@@ -308,6 +343,10 @@ extension ARViewContainer {
                     self.parent.sceneManager.annotationAnchors[id] = nil
                     self.parent.sceneManager.isEditing[id] = nil
                     self.parent.sceneManager.hasBeenTapped[id] = nil
+                    self.parent.sceneManager.annotationColors[id] = nil
+                    if self.parent.sceneManager.activeAnnotationEditingId == id {
+                        self.parent.sceneManager.clearActiveAnnotationEditingState()
+                    }
                     self.parent.sceneManager.fallbackRestoredAnnotationArtifactIds.remove(artifactId)
                 }
 
@@ -319,6 +358,46 @@ extension ARViewContainer {
             }
 
             notificationObservers.append(delete)
+        }
+
+        func subscribeToAnnotationNotifications(arView: ARView) {
+            let finishEditing = NotificationCenter.default.addObserver(
+                forName: .finishAnnotationEditing,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.finishActiveAnnotationEditingIfNeeded(on: arView)
+            }
+
+            let colorChanged = NotificationCenter.default.addObserver(
+                forName: .annotationColorChanged,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self = self else { return }
+                guard let id = notification.userInfo?["annotationId"] as? UUID,
+                      let color = notification.userInfo?["annotationColor"] as? UIColor else { return }
+
+                let colorHex = self.parent.annotationColorHex(from: color)
+                if let oldAnchor = self.parent.sceneManager.annotationAnchors[id] {
+                    let text = self.parent.sceneManager.annotationViews[id]?.text ?? ""
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let payload = ARViewContainer.AnnotationData(
+                        id: id,
+                        text: trimmed.isEmpty || text == "Tap to Edit" ? "" : text,
+                        colorHex: colorHex
+                    )
+                    let name = annotationNamePrefix + self.parent.encodeAnnotation(payload)
+                    let newAnchor = ARAnchor(name: name, transform: oldAnchor.transform)
+                    arView.session.add(anchor: newAnchor)
+                    arView.session.remove(anchor: oldAnchor)
+                    self.parent.sceneManager.annotationAnchors[id] = newAnchor
+                }
+
+                self.parent.updateAnnotationColorInFirestore(annotationId: id, colorHex: colorHex)
+            }
+
+            notificationObservers.append(contentsOf: [finishEditing, colorChanged])
         }
     }
 }

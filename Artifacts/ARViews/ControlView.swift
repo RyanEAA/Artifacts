@@ -233,6 +233,8 @@ struct SceneButtons: View {
             sceneManager.annotationViews.removeAll()
             sceneManager.isEditing.removeAll()
             sceneManager.hasBeenTapped.removeAll()
+            sceneManager.annotationColors.removeAll()
+            sceneManager.clearActiveAnnotationEditingState()
             for (_, badge) in sceneManager.artifactOwnerBadgeViews {
                 badge.removeFromSuperview()
             }

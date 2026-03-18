@@ -223,6 +223,8 @@ extension ARViewContainer {
         self.sceneManager.annotationAnchors.removeAll(keepingCapacity: true)
         self.sceneManager.isEditing.removeAll(keepingCapacity: true)
         self.sceneManager.hasBeenTapped.removeAll(keepingCapacity: true)
+        self.sceneManager.annotationColors.removeAll(keepingCapacity: true)
+        self.sceneManager.clearActiveAnnotationEditingState()
 
         // Clear old overrides, then prefetch new overrides for the scene that will be loaded.
         self.sceneManager.annotationTextOverrides = [:]
@@ -270,6 +272,12 @@ extension ARViewContainer {
                             self.preloadModelEntities(named: modelNames)
                             self.sceneManager.loadVisibleModelRecords = modelRecords
                             self.sceneManager.loadVisibleAnnotationArtifactIDs = Set(annotationRecords.map(\.artifactId))
+                            self.sceneManager.annotationColorOverrides = Dictionary(
+                                uniqueKeysWithValues: annotationRecords.compactMap { record in
+                                    guard let colorHex = record.annotationColorHex, !colorHex.isEmpty else { return nil }
+                                    return (record.artifactId, colorHex)
+                                }
+                            )
                             self.sceneManager.isLoadArtifactFilterActive = true
                             let ownerUIDs = Set(modelRecords.map(\.ownerUid)).union(annotationRecords.map(\.ownerUid))
                             ownerUIDs.forEach { self.prefetchOwnerUsernameIfNeeded(ownerUid: $0) }
@@ -311,6 +319,12 @@ extension ARViewContainer {
                         self.sceneManager.selectedCloudSceneStoragePath = storagePath
                         self.sceneManager.loadVisibleModelRecords = modelRecords
                         self.sceneManager.loadVisibleAnnotationArtifactIDs = Set(annotationRecords.map(\.artifactId))
+                        self.sceneManager.annotationColorOverrides = Dictionary(
+                            uniqueKeysWithValues: annotationRecords.compactMap { record in
+                                guard let colorHex = record.annotationColorHex, !colorHex.isEmpty else { return nil }
+                                return (record.artifactId, colorHex)
+                            }
+                        )
                         self.sceneManager.isLoadArtifactFilterActive = true
                         let ownerUIDs = Set(modelRecords.map(\.ownerUid)).union(annotationRecords.map(\.ownerUid))
                         ownerUIDs.forEach { self.prefetchOwnerUsernameIfNeeded(ownerUid: $0) }

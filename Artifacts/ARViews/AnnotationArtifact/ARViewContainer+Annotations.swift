@@ -14,10 +14,36 @@ extension ARViewContainer {
     struct AnnotationData: Codable {
         let id: UUID
         var text: String
+        var colorHex: String?
     }
 }
 
 extension ARViewContainer {
+
+    func annotationColorHex(from color: UIColor) -> String {
+        var r: CGFloat = 0
+        var g: CGFloat = 0
+        var b: CGFloat = 0
+        var a: CGFloat = 0
+        guard color.getRed(&r, green: &g, blue: &b, alpha: &a) else {
+            return "58D68D"
+        }
+        let red = Int(round(r * 255))
+        let green = Int(round(g * 255))
+        let blue = Int(round(b * 255))
+        return String(format: "%02X%02X%02X", red, green, blue)
+    }
+
+    func annotationColor(from hex: String?) -> UIColor? {
+        guard var hex else { return nil }
+        hex = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if hex.hasPrefix("#") { hex.removeFirst() }
+        guard hex.count == 6, let value = Int(hex, radix: 16) else { return nil }
+        let red = CGFloat((value >> 16) & 0xFF) / 255.0
+        let green = CGFloat((value >> 8) & 0xFF) / 255.0
+        let blue = CGFloat(value & 0xFF) / 255.0
+        return UIColor(red: red, green: green, blue: blue, alpha: 1.0)
+    }
 
     func prefetchOwnerUsernameIfNeeded(ownerUid: String) {
         guard !ownerUid.isEmpty else { return }
@@ -82,7 +108,11 @@ extension ARViewContainer {
             }
 
             guard let oldAnchor = self.sceneManager.annotationAnchors[id] else { continue }
-            let payload = AnnotationData(id: id, text: rawText)
+            let payload = AnnotationData(
+                id: id,
+                text: rawText,
+                colorHex: annotationColorHex(from: self.sceneManager.annotationColor(for: id))
+            )
             let desiredName = annotationNamePrefix + encodeAnnotation(payload)
             if oldAnchor.name == desiredName { continue }
             let newAnchor = ARAnchor(name: desiredName, transform: oldAnchor.transform)
@@ -95,6 +125,7 @@ extension ARViewContainer {
     private func saveAnnotationToFirestore(
         annotationId: UUID,
         text: String,
+        colorHex: String?,
         transform: simd_float4x4,
         on arView: ARView
     ) {
@@ -121,6 +152,7 @@ extension ARViewContainer {
                 try await ArtifactsService.shared.createAnnotationArtifact(
                     artifactId: artifactId,
                     annotationText: text,
+                    annotationColorHex: colorHex,
                     sceneId: sceneId,
                     transform: transform,
                     coordinate: coordinate
@@ -145,19 +177,28 @@ extension ARViewContainer {
         }
     }
 
-    func makeTextView(id: UUID, text: String) -> UITextView {
+    func updateAnnotationColorInFirestore(annotationId: UUID, colorHex: String?) {
+        let artifactId = annotationId.uuidString
+        Task {
+            do {
+                try await ArtifactsService.shared.updateAnnotationColor(
+                    artifactId: artifactId,
+                    annotationColorHex: colorHex
+                )
+            } catch {
+                print("⚠️ updateAnnotationColor error:", error.localizedDescription)
+            }
+        }
+    }
+
+    func makeTextView(id: UUID, text: String, color: UIColor) -> UITextView {
         let tv = UITextView(frame: .zero)
         let isEmpty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         tv.text = isEmpty ? "Tap to Edit" : text
         tv.font = .systemFont(ofSize: 16, weight: .semibold)
         tv.textAlignment = .center
         tv.textContainerInset = UIEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
-        tv.backgroundColor = UIColor.mintGreen.withAlphaComponent(0.92)
-        tv.textColor = UIColor.black.withAlphaComponent(0.92)
-        tv.layer.cornerRadius = 14
-        tv.layer.borderWidth = 1
-        tv.layer.borderColor = UIColor.mintGreen.withAlphaComponent(0.35).cgColor
-        tv.layer.masksToBounds = true
+        self.sceneManager.applyAnnotationStyle(to: tv, color: color, isEditing: false)
         tv.isScrollEnabled = false
         tv.isEditable = false
         tv.isUserInteractionEnabled = false
@@ -167,7 +208,11 @@ extension ARViewContainer {
 
     func attachAnnotationView(for anchor: ARAnchor, data: AnnotationData, on arView: ARView) {
         if self.sceneManager.annotationViews[data.id] != nil { return }
-        let tv = makeTextView(id: data.id, text: data.text)
+        let resolvedColor = annotationColor(from: data.colorHex)
+            ?? self.sceneManager.annotationColors[data.id]
+            ?? SceneManager.defaultAnnotationColor
+        self.sceneManager.annotationColors[data.id] = resolvedColor
+        let tv = makeTextView(id: data.id, text: data.text, color: resolvedColor)
         if let coord = arView.session.delegate as? Coordinator {
             tv.delegate = coord
         }
@@ -351,7 +396,13 @@ extension ARViewContainer {
         startRealtimeAnnotationSyncIfNeeded(on: arView)
 
         let id = UUID()
-        let payload = AnnotationData(id: id, text: text)
+        let color = SceneManager.defaultAnnotationColor
+        self.sceneManager.annotationColors[id] = color
+        let payload = AnnotationData(
+            id: id,
+            text: text,
+            colorHex: annotationColorHex(from: color)
+        )
         let name = annotationNamePrefix + encodeAnnotation(payload)
         let anchor = ARAnchor(name: name, transform: transform)
         arView.session.add(anchor: anchor)
@@ -373,7 +424,14 @@ extension ARViewContainer {
         self.sceneManager.pendingAnnotationText = nil
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        saveAnnotationToFirestore(annotationId: id, text: trimmed, transform: transform, on: arView)
+        let colorHex = annotationColorHex(from: color)
+        saveAnnotationToFirestore(
+            annotationId: id,
+            text: trimmed,
+            colorHex: colorHex,
+            transform: transform,
+            on: arView
+        )
     }
 
     func placeAnnotation(at point: CGPoint, on arView: ARView) {
@@ -386,7 +444,13 @@ extension ARViewContainer {
         startRealtimeAnnotationSyncIfNeeded(on: arView)
 
         let id = UUID()
-        let payload = AnnotationData(id: id, text: rawText == "Tap to Edit" ? "" : rawText)
+        let color = SceneManager.defaultAnnotationColor
+        self.sceneManager.annotationColors[id] = color
+        let payload = AnnotationData(
+            id: id,
+            text: rawText == "Tap to Edit" ? "" : rawText,
+            colorHex: annotationColorHex(from: color)
+        )
         let name = annotationNamePrefix + encodeAnnotation(payload)
         let anchor = ARAnchor(name: name, transform: transform)
         arView.session.add(anchor: anchor)
@@ -409,7 +473,14 @@ extension ARViewContainer {
         self.placementSettings.selectedTool = .none
 
         let trimmed = payload.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        saveAnnotationToFirestore(annotationId: id, text: trimmed, transform: transform, on: arView)
+        let colorHex = annotationColorHex(from: color)
+        saveAnnotationToFirestore(
+            annotationId: id,
+            text: trimmed,
+            colorHex: colorHex,
+            transform: transform,
+            on: arView
+        )
     }
 
     func showDeleteButton(for id: UUID, on arView: ARView) {

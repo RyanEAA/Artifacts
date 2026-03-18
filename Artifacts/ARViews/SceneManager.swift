@@ -58,6 +58,9 @@ class SceneManager: ObservableObject {
     var annotationAnchors: [UUID: ARAnchor] = [:]
     var isEditing: [UUID: Bool] = [:]
     var hasBeenTapped: [UUID: Bool] = [:]
+    var annotationColors: [UUID: UIColor] = [:]
+    @Published var activeAnnotationEditingId: UUID?
+    @Published var activeAnnotationColor: UIColor = SceneManager.defaultAnnotationColor
     var pendingAnnotationText: String?
     var annotationsSceneObserver: Cancellable?
 
@@ -82,6 +85,7 @@ class SceneManager: ObservableObject {
     // Firestore override cache for the currently loading scene.
     // Key is artifactId (UUID string), value is annotationText.
     var annotationTextOverrides: [String: String] = [:]
+    var annotationColorOverrides: [String: String] = [:]
     var annotationTextListener: ListenerRegistration?
     var annotationTextListenerSceneId: String?
     @Published var isPersistenceInProgress: Bool = false
@@ -97,6 +101,66 @@ class SceneManager: ObservableObject {
     private var restoredAnnotationCount: Int = 0
     private var restoredDrawingCount: Int = 0
 
+    static var defaultAnnotationColor: UIColor {
+        UIColor(named: "MintGreen") ?? .systemMint
+    }
+
+    func annotationColor(for id: UUID) -> UIColor {
+        annotationColors[id] ?? Self.defaultAnnotationColor
+    }
+
+    func updateActiveAnnotationColor(_ color: UIColor) {
+        activeAnnotationColor = color
+        guard let id = activeAnnotationEditingId else { return }
+        annotationColors[id] = color
+        if let tv = annotationViews[id] {
+            applyAnnotationStyle(
+                to: tv,
+                color: color,
+                isEditing: isEditing[id] ?? false
+            )
+        }
+        NotificationCenter.default.post(
+            name: .annotationColorChanged,
+            object: nil,
+            userInfo: [
+                "annotationId": id,
+                "annotationColor": color
+            ]
+        )
+    }
+
+    func applyAnnotationStyle(to textView: UITextView, color: UIColor, isEditing: Bool) {
+        textView.backgroundColor = color.withAlphaComponent(0.92)
+        textView.textColor = preferredAnnotationTextColor(for: color)
+        textView.layer.cornerRadius = 14
+        textView.layer.masksToBounds = true
+        textView.layer.borderWidth = isEditing ? 2 : 1
+        textView.layer.borderColor = isEditing
+            ? UIColor.systemBlue.cgColor
+            : color.withAlphaComponent(0.35).cgColor
+    }
+
+    func clearActiveAnnotationEditingState() {
+        activeAnnotationEditingId = nil
+        activeAnnotationColor = Self.defaultAnnotationColor
+    }
+
+    private func preferredAnnotationTextColor(for color: UIColor) -> UIColor {
+        var r: CGFloat = 1
+        var g: CGFloat = 1
+        var b: CGFloat = 1
+        var a: CGFloat = 1
+        guard color.getRed(&r, green: &g, blue: &b, alpha: &a) else {
+            return UIColor.black.withAlphaComponent(0.92)
+        }
+        let luminance = (0.2126 * r) + (0.7152 * g) + (0.0722 * b)
+        if luminance < 0.55 {
+            return UIColor.white.withAlphaComponent(0.95)
+        }
+        return UIColor.black.withAlphaComponent(0.92)
+    }
+
     func requestAddAnnotation(text: String) {
         pendingAnnotationText = text
     }
@@ -110,6 +174,7 @@ class SceneManager: ObservableObject {
     func resetLoadArtifactFilters() {
         loadVisibleModelRecords = []
         loadVisibleAnnotationArtifactIDs = []
+        annotationColorOverrides = [:]
         isLoadArtifactFilterActive = false
     }
 

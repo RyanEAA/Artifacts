@@ -72,6 +72,7 @@ struct ARViewContainer: UIViewRepresentable {
         // Drawing: wire undo/clear notifications posted by DrawingToolbarView
         context.coordinator.subscribeToDrawingNotifications(arView: arView)
         context.coordinator.subscribeToArtifactDeletionNotifications(arView: arView)
+        context.coordinator.subscribeToAnnotationNotifications(arView: arView)
 
         // Update loop
         self.placementSettings.sceneObserver = arView.scene.subscribe(
