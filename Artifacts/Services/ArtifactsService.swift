@@ -307,6 +307,36 @@ final class ArtifactsService {
         try await batch.commit()
     }
 
+    func deleteMyDraftArtifacts(
+        sceneId: String,
+        excludingArtifactIds keepingArtifactIds: Set<String>
+    ) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "ArtifactsService", code: 401, userInfo: [
+                NSLocalizedDescriptionKey: "User is not authenticated"
+            ])
+        }
+        guard !sceneId.isEmpty else { return }
+
+        let snap = try await db.collection("artifacts")
+            .whereField("ownerUid", isEqualTo: uid)
+            .whereField("sceneId", isEqualTo: sceneId)
+            .whereField("published", isEqualTo: false)
+            .getDocuments()
+
+        let docsToDelete = snap.documents.filter { !keepingArtifactIds.contains($0.documentID) }
+        guard !docsToDelete.isEmpty else { return }
+
+        let batch = db.batch()
+        for doc in docsToDelete {
+            batch.deleteDocument(doc.reference)
+        }
+        try await batch.commit()
+        for doc in docsToDelete {
+            NotificationCenter.default.post(name: .artifactDeleted, object: doc.documentID)
+        }
+    }
+
     // MARK: - Annotation Text Overrides For Reload
 
     /// Fetch latest annotation text for the current user and scene from Firestore.
@@ -539,6 +569,11 @@ final class ArtifactsService {
             .collection("artifacts")
             .document(artifactId)
             .delete()
+        NotificationCenter.default.post(name: .artifactDeleted, object: artifactId)
+    }
+
+    func deleteArtifactAsync(artifactId: String) async throws {
+        try await db.collection("artifacts").document(artifactId).delete()
         NotificationCenter.default.post(name: .artifactDeleted, object: artifactId)
     }
 

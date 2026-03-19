@@ -10,6 +10,37 @@ import FirebaseAuth
 
 extension ARViewContainer {
 
+    private func currentDraftArtifactIdsForCloudSave() -> Set<String> {
+        var artifactIds = Set<String>()
+
+        artifactIds.formUnion(self.sceneManager.modelAnchorEntitiesByArtifactId.keys)
+        artifactIds.formUnion(self.sceneManager.fallbackModelEntitiesByArtifactId.keys)
+        artifactIds.formUnion(self.sceneManager.annotationViews.keys.map(\.uuidString))
+        artifactIds.formUnion(self.sceneManager.annotationAnchors.keys.map(\.uuidString))
+        artifactIds.formUnion(self.sceneManager.drawingManager.strokeGroups.map(\.artifactId))
+        artifactIds.subtract(self.sceneManager.deletedArtifactIds)
+
+        return artifactIds
+    }
+
+    private func flushArtifactPersistenceBeforeSceneSave(sceneId: String) async throws {
+        let pendingTasks = Array(self.sceneManager.pendingArtifactSaveTasks.values)
+        for task in pendingTasks {
+            await task.value
+        }
+
+        let activeArtifactIds = currentDraftArtifactIdsForCloudSave()
+        try await ArtifactsService.shared.deleteMyDraftArtifacts(
+            sceneId: sceneId,
+            excludingArtifactIds: activeArtifactIds
+        )
+
+        let deletedArtifactIds = Array(self.sceneManager.deletedArtifactIds)
+        for artifactId in deletedArtifactIds {
+            try? await ArtifactsService.shared.deleteArtifactAsync(artifactId: artifactId)
+        }
+    }
+
     func consumeMatchingVisibleModelRecord(modelName: String, transform: simd_float4x4) -> ModelArtifactRecord? {
         guard self.sceneManager.isLoadArtifactFilterActive else { return nil }
 
@@ -158,6 +189,7 @@ extension ARViewContainer {
                             case .success(let savedId):
                                 Task {
                                     do {
+                                        try await self.flushArtifactPersistenceBeforeSceneSave(sceneId: savedId)
                                         if let oldSceneId = remappedFromSceneId, oldSceneId != savedId {
                                             try await ArtifactsService.shared.remapMyDraftArtifacts(
                                                 fromSceneId: oldSceneId,
@@ -203,7 +235,12 @@ extension ARViewContainer {
         self.sceneManager.resetLoadArtifactFilters()
         self.sceneManager.anchorEntities.removeAll(keepingCapacity: true)
         self.sceneManager.modelAnchorEntitiesByArtifactId.removeAll(keepingCapacity: true)
+        self.sceneManager.locallyPlacedModelAnchorIDs.removeAll(keepingCapacity: true)
+        self.sceneManager.modelArtifactNamesById.removeAll(keepingCapacity: true)
         self.sceneManager.fallbackModelEntitiesByArtifactId.removeAll(keepingCapacity: true)
+        self.sceneManager.quickDeleteButton?.removeFromSuperview()
+        self.sceneManager.quickDeleteButton = nil
+        self.sceneManager.selectedArtifactForQuickDelete = nil
         self.clearAllDrawings(in: arView)
         self.sceneManager.fallbackArtifactAnchorEntity?.removeFromParent()
         self.sceneManager.fallbackArtifactAnchorEntity = nil
@@ -416,12 +453,13 @@ extension ARViewContainer {
             worldContainer.addChild(entity)
             root.addChild(worldContainer)
             self.sceneManager.fallbackModelEntitiesByArtifactId[record.artifactId] = worldContainer
+            self.sceneManager.modelArtifactNamesById[record.artifactId] = record.modelName
             self.sceneManager.fallbackRestoredModelArtifactIds.insert(record.artifactId)
             if self.sceneManager.artifactOwnerBadgeViews[record.artifactId] == nil {
                 self.upsertArtifactOwnerBadge(
                     artifactId: record.artifactId,
                     ownerUid: record.ownerUid,
-                    worldPosition: self.modelBadgeWorldPosition(for: entity),
+                    worldPosition: self.modelBadgeWorldPosition(for: entity, modelName: record.modelName),
                     yOffset: -8,
                     on: arView
                 )

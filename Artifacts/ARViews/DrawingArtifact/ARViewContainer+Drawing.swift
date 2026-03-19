@@ -83,6 +83,7 @@ extension ARViewContainer {
         // Build or reuse a reference entity per color+size combination
         let bead = makeReferenceBead(color: dm.brushColor, radius: dm.brushSize).clone(recursive: false)
         bead.position = worldPos
+        bead.generateCollisionShapes(recursive: false)
 
         // Lazily create one shared world-space anchor for all beads
         if sceneManager.drawAnchorEntity == nil {
@@ -180,10 +181,19 @@ extension ARViewContainer {
 
     func saveDrawingStrokeToFirestore(_ stroke: DrawingManager.StrokeRecord, on arView: ARView) {
         let coordinate = LocationService.shared.currentCoordinate
+        self.sceneManager.deletedArtifactIds.remove(stroke.artifactId)
+        self.sceneManager.pendingArtifactSaveTasks[stroke.artifactId]?.cancel()
 
-        Task {
+        let task = Task {
+            defer {
+                DispatchQueue.main.async {
+                    self.sceneManager.pendingArtifactSaveTasks[stroke.artifactId] = nil
+                }
+            }
             do {
+                if Task.isCancelled || self.sceneManager.deletedArtifactIds.contains(stroke.artifactId) { return }
                 let sceneId = try await writableSceneIdForArtifactWrites()
+                if Task.isCancelled || self.sceneManager.deletedArtifactIds.contains(stroke.artifactId) { return }
                 try await ArtifactsService.shared.createDrawingArtifact(
                     artifactId: stroke.artifactId,
                     sceneId: sceneId,
@@ -197,14 +207,18 @@ extension ARViewContainer {
                         artifactId: stroke.artifactId,
                         ownerUid: Auth.auth().currentUser?.uid ?? "",
                         worldPosition: first,
-                        yOffset: -28,
+                        yOffset: -14,
                         on: arView
                     )
+                }
+                if self.sceneManager.deletedArtifactIds.contains(stroke.artifactId) {
+                    try await ArtifactsService.shared.deleteArtifactAsync(artifactId: stroke.artifactId)
                 }
             } catch {
                 print("⚠️ createDrawingArtifact error:", error.localizedDescription)
             }
         }
+        self.sceneManager.pendingArtifactSaveTasks[stroke.artifactId] = task
     }
 
     func clearAllDrawings(in arView: ARView) {
@@ -243,6 +257,7 @@ extension ARViewContainer {
                             let bead = makeReferenceBead(color: color, radius: stroke.brushSize)
                                 .clone(recursive: false)
                             bead.position = point
+                            bead.generateCollisionShapes(recursive: false)
 
                             if self.sceneManager.drawAnchorEntity == nil {
                                 let anchor = AnchorEntity(world: .zero)
@@ -266,7 +281,7 @@ extension ARViewContainer {
                                 artifactId: stroke.artifactId,
                                 ownerUid: stroke.ownerUid,
                                 worldPosition: first,
-                                yOffset: -28,
+                                yOffset: -14,
                                 on: arView
                             )
                         }
@@ -281,6 +296,11 @@ extension ARViewContainer {
 
     func restoreDrawingsAfterRelocalization(sceneId: String, in arView: ARView, maxWaitSeconds: TimeInterval = 10) {
         guard !sceneId.isEmpty else { return }
+
+        if self.sceneManager.areModelAndAnnotationRestoresSatisfied() {
+            self.restoreDrawingsFromCloud(sceneId: sceneId, in: arView)
+            return
+        }
 
         let deadline = Date().addingTimeInterval(maxWaitSeconds)
 

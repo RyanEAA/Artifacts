@@ -212,6 +212,7 @@ struct SceneButtons: View {
             }
             sceneManager.anchorEntities.removeAll()
             sceneManager.modelAnchorEntitiesByArtifactId.removeAll()
+            sceneManager.locallyPlacedModelAnchorIDs.removeAll()
             sceneManager.fallbackArtifactAnchorEntity?.removeFromParent()
             sceneManager.fallbackArtifactAnchorEntity = nil
             sceneManager.fallbackModelEntitiesByArtifactId.removeAll()

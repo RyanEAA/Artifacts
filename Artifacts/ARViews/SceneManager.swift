@@ -48,6 +48,10 @@ class SceneManager: ObservableObject {
 
     @Published var annotationViews: [UUID: UITextView] = [:]
     @Published var deleteButtons: [UUID: UIButton] = [:]
+    var quickDeleteButton: UIButton?
+    @Published var selectedArtifactForQuickDelete: String?
+    var deletedArtifactIds: Set<String> = []
+    var pendingArtifactSaveTasks: [String: Task<Void, Never>] = [:]
     @Published var artifactOwnerBadgeViews: [String: UILabel] = [:]
     var artifactOwnerBadgeWorldPositions: [String: SIMD3<Float>] = [:]
     var artifactOwnerBadgeOffsetsY: [String: CGFloat] = [:]
@@ -81,7 +85,9 @@ class SceneManager: ObservableObject {
     var loadVisibleAnnotationOwnerUIDs: [String: String] = [:]
     var isLoadArtifactFilterActive: Bool = false
     var modelAnchorEntitiesByArtifactId: [String: AnchorEntity] = [:]
+    var modelArtifactNamesById: [String: String] = [:]
     var fallbackModelEntitiesByArtifactId: [String: Entity] = [:]
+    var locallyPlacedModelAnchorIDs: Set<UUID> = []
 
     // Firestore override cache for the currently loading scene.
     // Key is artifactId (UUID string), value is annotationText.
@@ -96,6 +102,7 @@ class SceneManager: ObservableObject {
     var onVisibleArtifactsReady: (() -> Void)?
     private var persistenceNoticeWorkItem: DispatchWorkItem?
     private var loadVisibilityTimeoutWorkItem: DispatchWorkItem?
+    private var loadFilterResetWorkItem: DispatchWorkItem?
     private var expectedRestoredModelCount: Int = 0
     private var expectedRestoredAnnotationCount: Int = 0
     private var expectedRestoredDrawingCount: Int = 0
@@ -174,6 +181,8 @@ class SceneManager: ObservableObject {
     }
 
     func resetLoadArtifactFilters() {
+        loadFilterResetWorkItem?.cancel()
+        loadFilterResetWorkItem = nil
         loadVisibleModelRecords = []
         loadVisibleAnnotationArtifactIDs = []
         loadVisibleAnnotationOwnerUIDs = [:]
@@ -245,7 +254,7 @@ class SceneManager: ObservableObject {
             self.fallbackArtifactAnchorEntity?.isEnabled = true
             self.isAwaitingVisibleArtifactsAfterLoad = false
             self.onVisibleArtifactsReady?()
-            self.resetLoadArtifactFilters()
+            self.scheduleLoadFilterReset()
             self.endPersistenceProgress()
             self.postPersistenceNotice("Scene loaded and artifacts restored.", style: .success)
         }
@@ -261,7 +270,7 @@ class SceneManager: ObservableObject {
                 self.fallbackArtifactAnchorEntity?.isEnabled = true
                 self.isAwaitingVisibleArtifactsAfterLoad = false
                 self.onVisibleArtifactsReady?()
-                self.resetLoadArtifactFilters()
+                self.scheduleLoadFilterReset()
                 self.endPersistenceProgress()
                 self.postPersistenceNotice(
                     "Scene map loaded. Move your device to relocalize artifacts.",
@@ -313,6 +322,15 @@ class SceneManager: ObservableObject {
         let modelsDone = self.restoredModelCount >= self.expectedRestoredModelCount
         let annotationsDone = self.restoredAnnotationCount >= self.expectedRestoredAnnotationCount
         return modelsDone && annotationsDone
+    }
+
+    private func scheduleLoadFilterReset(after seconds: TimeInterval = 2.0) {
+        loadFilterResetWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.resetLoadArtifactFilters()
+        }
+        loadFilterResetWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: workItem)
     }
 }
 

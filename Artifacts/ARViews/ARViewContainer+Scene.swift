@@ -11,13 +11,35 @@ import QuartzCore
 
 extension ARViewContainer {
 
-    func modelBadgeWorldPosition(for modelEntity: ModelEntity) -> SIMD3<Float> {
+    private func isChameleonModelName(_ modelName: String?) -> Bool {
+        guard let modelName = modelName?.lowercased() else { return false }
+        return modelName.contains("chameleon") || modelName.contains("chamelon")
+    }
+
+    private func adjustedModelBounds(for modelEntity: ModelEntity, modelName: String?) -> BoundingBox {
         let bounds = modelEntity.visualBounds(relativeTo: nil)
+        guard isChameleonModelName(modelName) else {
+            return bounds
+        }
+
+        let shift = bounds.extents.x * 0.18
+        return BoundingBox(
+            min: SIMD3<Float>(bounds.min.x - shift, bounds.min.y, bounds.min.z),
+            max: SIMD3<Float>(bounds.max.x - shift, bounds.max.y, bounds.max.z)
+        )
+    }
+
+    func modelBadgeWorldPosition(for modelEntity: ModelEntity, modelName: String? = nil) -> SIMD3<Float> {
+        let bounds = adjustedModelBounds(for: modelEntity, modelName: modelName)
         return SIMD3<Float>(
             bounds.center.x,
-            bounds.center.y + (bounds.extents.y * 0.5) + 0.06,
+            bounds.center.y + (bounds.extents.y * 0.5) + 0.02,
             bounds.center.z
         )
+    }
+
+    func modelCenterWorldPosition(for modelEntity: ModelEntity, modelName: String? = nil) -> SIMD3<Float> {
+        adjustedModelBounds(for: modelEntity, modelName: modelName).center
     }
 
     func writableSceneIdForArtifactWrites() async throws -> String {
@@ -58,10 +80,19 @@ extension ARViewContainer {
         in arView: ARView
     ) {
         let coordinate = LocationService.shared.currentCoordinate
+        self.sceneManager.deletedArtifactIds.remove(artifactId)
+        self.sceneManager.pendingArtifactSaveTasks[artifactId]?.cancel()
 
-        Task {
+        let task = Task {
+            defer {
+                DispatchQueue.main.async {
+                    self.sceneManager.pendingArtifactSaveTasks[artifactId] = nil
+                }
+            }
             do {
+                if Task.isCancelled || self.sceneManager.deletedArtifactIds.contains(artifactId) { return }
                 let sceneId = try await writableSceneIdForArtifactWrites()
+                if Task.isCancelled || self.sceneManager.deletedArtifactIds.contains(artifactId) { return }
                 print("🟩 Saving model artifact modelName:", modelName, "sceneId:", sceneId, "artifactId:", artifactId)
                 try await ArtifactsService.shared.createModelArtifact(
                     artifactId: artifactId,
@@ -70,11 +101,16 @@ extension ARViewContainer {
                     transform: transform,
                     coordinate: coordinate
                 )
+                if self.sceneManager.deletedArtifactIds.contains(artifactId) {
+                    try await ArtifactsService.shared.deleteArtifactAsync(artifactId: artifactId)
+                    return
+                }
                 print("✅ Saved model artifact:", artifactId)
             } catch {
                 print("❌ createModelArtifact error:", error.localizedDescription)
             }
         }
+        self.sceneManager.pendingArtifactSaveTasks[artifactId] = task
     }
 
     func updateScene(for arView: CustomARView) {
@@ -134,11 +170,12 @@ extension ARViewContainer {
                 let artifactId = modelAnchor.artifactId ?? "model-anchor-\(anchor.identifier.uuidString)"
                 let ownerUid = modelAnchor.ownerUid ?? self.sceneManager.selectedSceneOwnerUid ?? Auth.auth().currentUser?.uid ?? ""
                 self.sceneManager.modelAnchorEntitiesByArtifactId[artifactId] = placed.anchorEntity
+                self.sceneManager.modelArtifactNamesById[artifactId] = modelAnchor.model.name
                 if !ownerUid.isEmpty {
                     self.upsertArtifactOwnerBadge(
                         artifactId: artifactId,
                         ownerUid: ownerUid,
-                        worldPosition: self.modelBadgeWorldPosition(for: placed.modelEntity),
+                        worldPosition: self.modelBadgeWorldPosition(for: placed.modelEntity, modelName: modelAnchor.model.name),
                         yOffset: -8,
                         on: arView
                     )
@@ -152,16 +189,18 @@ extension ARViewContainer {
                 let anchorName = anchorNamePrefix + modelAnchor.model.name
                 let anchor = ARAnchor(name: anchorName, transform: transform)
                 let placed = self.place(modelEntity, for: anchor, in: arView)
+                self.sceneManager.locallyPlacedModelAnchorIDs.insert(anchor.identifier)
                 arView.session.add(anchor: anchor)
                 self.placementSettings.recentlyPlaced.append(modelAnchor.model)
                 let artifactId = modelAnchor.artifactId ?? UUID().uuidString
                 let ownerUid = Auth.auth().currentUser?.uid ?? ""
                 self.sceneManager.modelAnchorEntitiesByArtifactId[artifactId] = placed.anchorEntity
+                self.sceneManager.modelArtifactNamesById[artifactId] = modelAnchor.model.name
                 if !ownerUid.isEmpty {
                     self.upsertArtifactOwnerBadge(
                         artifactId: artifactId,
                         ownerUid: ownerUid,
-                        worldPosition: self.modelBadgeWorldPosition(for: placed.modelEntity),
+                        worldPosition: self.modelBadgeWorldPosition(for: placed.modelEntity, modelName: modelAnchor.model.name),
                         yOffset: -8,
                         on: arView
                     )

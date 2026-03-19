@@ -90,6 +90,9 @@ extension ARViewContainer {
                 }
                 // Model anchors
                 if let anchorName = anchor.name, anchorName.hasPrefix(anchorNamePrefix) {
+                    if self.parent.sceneManager.locallyPlacedModelAnchorIDs.remove(anchor.identifier) != nil {
+                        continue
+                    }
                     let modelName = anchorName.dropFirst(anchorNamePrefix.count)
                     print("ARSession: didAdd anchor for modelName: \(modelName)")
                     let matchedRecord = self.parent.consumeMatchingVisibleModelRecord(
@@ -156,6 +159,12 @@ extension ARViewContainer {
             parent.sceneManager.deleteButtons[id] = button
         }
 
+        func registerQuickDeleteButton(_ button: UIButton) {
+            button.addTarget(self,
+                             action: #selector(handleQuickDeleteButton(_:)),
+                             for: .touchUpInside)
+        }
+
         @objc func handleDeleteButton(_ sender: UIButton) {
             guard let arView = arView else { return }
             guard let (id, _) = parent.sceneManager.deleteButtons
@@ -182,11 +191,142 @@ extension ARViewContainer {
                 parent.sceneManager.clearActiveAnnotationEditingState()
             }
             let artifactId = id.uuidString
-            parent.sceneManager.artifactOwnerBadgeViews[artifactId]?.removeFromSuperview()
-            parent.sceneManager.artifactOwnerBadgeViews[artifactId] = nil
-            parent.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = nil
-            parent.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = nil
-            parent.sceneManager.artifactOwnerBadgeOwnerUids[artifactId] = nil
+            parent.sceneManager.deletedArtifactIds.insert(artifactId)
+            parent.sceneManager.pendingArtifactSaveTasks[artifactId]?.cancel()
+            parent.sceneManager.pendingArtifactSaveTasks[artifactId] = nil
+            parent.removeArtifactOwnerBadge(artifactId: artifactId)
+            ArtifactsService.shared.deleteArtifact(artifactId: artifactId)
+        }
+
+        @objc func handleQuickDeleteButton(_ sender: UIButton) {
+            guard let arView = arView else { return }
+            guard let artifactId = parent.sceneManager.selectedArtifactForQuickDelete else { return }
+            let modelDeletionContext = modelDeletionContext(for: artifactId)
+            parent.hideQuickDeleteButton()
+            parent.sceneManager.deletedArtifactIds.insert(artifactId)
+            parent.sceneManager.pendingArtifactSaveTasks[artifactId]?.cancel()
+            parent.sceneManager.pendingArtifactSaveTasks[artifactId] = nil
+            removeLocalArtifact(artifactId, from: arView)
+            Task {
+                if let modelDeletionContext {
+                    try? await ArtifactsService.shared.deleteMyDraftModelArtifact(
+                        sceneId: modelDeletionContext.sceneId,
+                        modelName: modelDeletionContext.modelName,
+                        transform: modelDeletionContext.transform
+                    )
+                }
+                ArtifactsService.shared.deleteArtifact(artifactId: artifactId)
+            }
+        }
+
+        private func isEntity(_ entity: Entity, descendantOf ancestor: Entity) -> Bool {
+            var current: Entity? = entity
+            while let node = current {
+                if node === ancestor {
+                    return true
+                }
+                current = node.parent
+            }
+            return false
+        }
+
+        private func artifactIdForTappedEntity(_ entity: Entity) -> String? {
+            for (artifactId, anchorEntity) in parent.sceneManager.modelAnchorEntitiesByArtifactId {
+                if entity === anchorEntity
+                    || isEntity(entity, descendantOf: anchorEntity)
+                    || isEntity(anchorEntity, descendantOf: entity) {
+                    return artifactId
+                }
+            }
+
+            for (artifactId, fallbackEntity) in parent.sceneManager.fallbackModelEntitiesByArtifactId {
+                if entity === fallbackEntity
+                    || isEntity(entity, descendantOf: fallbackEntity)
+                    || isEntity(fallbackEntity, descendantOf: entity) {
+                    return artifactId
+                }
+            }
+
+            for stroke in parent.sceneManager.drawingManager.strokeGroups {
+                if stroke.beads.contains(where: {
+                    entity === $0 || isEntity(entity, descendantOf: $0) || isEntity($0, descendantOf: entity)
+                }) {
+                    return stroke.artifactId
+                }
+            }
+
+            return nil
+        }
+
+        private func removeLocalArtifact(_ artifactId: String, from arView: ARView) {
+            self.parent.sceneManager.loadVisibleModelRecords.removeAll { $0.artifactId == artifactId }
+            self.parent.sceneManager.loadVisibleAnnotationArtifactIDs.remove(artifactId)
+            self.parent.sceneManager.loadVisibleAnnotationOwnerUIDs[artifactId] = nil
+            self.parent.sceneManager.annotationTextOverrides[artifactId] = nil
+            self.parent.sceneManager.annotationColorOverrides[artifactId] = nil
+            if let anchorEntity = self.parent.sceneManager.modelAnchorEntitiesByArtifactId[artifactId] {
+                if let anchors = arView.session.currentFrame?.anchors,
+                   let sessionAnchor = anchors.first(where: { $0.identifier == anchorEntity.anchorIdentifier }) {
+                    arView.session.remove(anchor: sessionAnchor)
+                }
+                anchorEntity.removeFromParent()
+                self.parent.sceneManager.anchorEntities.removeAll { $0 === anchorEntity }
+                self.parent.sceneManager.modelAnchorEntitiesByArtifactId[artifactId] = nil
+                self.parent.sceneManager.modelArtifactNamesById[artifactId] = nil
+            }
+
+            if let fallbackEntity = self.parent.sceneManager.fallbackModelEntitiesByArtifactId[artifactId] {
+                fallbackEntity.removeFromParent()
+                self.parent.sceneManager.fallbackModelEntitiesByArtifactId[artifactId] = nil
+                self.parent.sceneManager.modelArtifactNamesById[artifactId] = nil
+                self.parent.sceneManager.fallbackRestoredModelArtifactIds.remove(artifactId)
+            }
+
+            if let id = UUID(uuidString: artifactId) {
+                if let view = self.parent.sceneManager.annotationViews[id] {
+                    view.removeFromSuperview()
+                }
+                if let button = self.parent.sceneManager.deleteButtons[id] {
+                    button.removeFromSuperview()
+                }
+                if let anchor = self.parent.sceneManager.annotationAnchors[id] {
+                    arView.session.remove(anchor: anchor)
+                }
+                self.parent.sceneManager.annotationViews[id] = nil
+                self.parent.sceneManager.deleteButtons[id] = nil
+                self.parent.sceneManager.annotationAnchors[id] = nil
+                self.parent.sceneManager.isEditing[id] = nil
+                self.parent.sceneManager.hasBeenTapped[id] = nil
+                self.parent.sceneManager.annotationColors[id] = nil
+                if self.parent.sceneManager.activeAnnotationEditingId == id {
+                    self.parent.sceneManager.clearActiveAnnotationEditingState()
+                }
+                self.parent.sceneManager.fallbackRestoredAnnotationArtifactIds.remove(artifactId)
+            }
+
+            if self.parent.sceneManager.drawingManager.removeStroke(artifactId: artifactId, in: arView.scene) {
+                // Removal handled above; nothing else needed here.
+            }
+
+            self.parent.removeArtifactOwnerBadge(artifactId: artifactId)
+        }
+
+        private func modelDeletionContext(for artifactId: String) -> (sceneId: String, modelName: String, transform: simd_float4x4)? {
+            guard let sceneId = self.parent.sceneManager.selectedCloudSceneId, !sceneId.isEmpty else {
+                return nil
+            }
+
+            if let anchorEntity = self.parent.sceneManager.modelAnchorEntitiesByArtifactId[artifactId],
+               let modelName = self.parent.sceneManager.modelArtifactNamesById[artifactId] {
+                return (sceneId, modelName, anchorEntity.transformMatrix(relativeTo: nil))
+            }
+
+            if let fallbackEntity = self.parent.sceneManager.fallbackModelEntitiesByArtifactId[artifactId],
+               let modelName = self.parent.sceneManager.modelArtifactNamesById[artifactId] {
+                return (sceneId, modelName, fallbackEntity.transformMatrix(relativeTo: nil))
+            }
+
+            return nil
         }
 
         // MARK: - Tap Gesture (Annotation Placement & Editing)
@@ -223,6 +363,7 @@ extension ARViewContainer {
                         parent.sceneManager.hasBeenTapped[id] = true
                     }
                     tv.becomeFirstResponder()
+                    parent.showQuickDeleteButton(for: id.uuidString, on: arView)
                     parent.animatePopIn(tv)
                     return
                 }
@@ -230,8 +371,17 @@ extension ARViewContainer {
 
             // 2) Some annotation is currently editing → end editing
             if finishActiveAnnotationEditingIfNeeded(on: arView) {
+                parent.hideQuickDeleteButton()
                 return
             }
+
+            if let entity = arView.entity(at: location),
+               let artifactId = artifactIdForTappedEntity(entity) {
+                parent.showQuickDeleteButton(for: artifactId, on: arView)
+                return
+            }
+
+            parent.hideQuickDeleteButton()
 
             // 3) No annotation editing — dispatch based on selected tool
             switch parent.placementSettings.selectedTool {
@@ -264,9 +414,6 @@ extension ARViewContainer {
                 if trimmed.isEmpty {
                     tv.text = "Tap to Edit"
                     parent.sceneManager.hasBeenTapped[editingId] = false
-                    parent.showDeleteButton(for: editingId, on: arView)
-                } else {
-                    parent.hideDeleteButton(for: editingId)
                 }
 
                 if let oldAnchor = parent.sceneManager.annotationAnchors[editingId] {
@@ -293,16 +440,10 @@ extension ARViewContainer {
         // MARK: - UITextViewDelegate
 
         func textViewDidChange(_ textView: UITextView) {
-            guard let arView = arView else { return }
             if let (id, _) = parent.sceneManager.annotationViews
                 .first(where: { $0.value === textView }) {
-                let empty = textView.text
+                parent.sceneManager.hasBeenTapped[id] = !textView.text
                     .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                if empty {
-                    parent.showDeleteButton(for: id, on: arView)
-                } else {
-                    parent.hideDeleteButton(for: id)
-                }
             }
         }
 
@@ -314,46 +455,7 @@ extension ARViewContainer {
             ) { [weak self] notification in
                 guard let self = self else { return }
                 guard let artifactId = notification.object as? String else { return }
-
-                if let anchorEntity = self.parent.sceneManager.modelAnchorEntitiesByArtifactId[artifactId] {
-                    if let anchors = arView.session.currentFrame?.anchors,
-                       let sessionAnchor = anchors.first(where: { $0.identifier == anchorEntity.anchorIdentifier }) {
-                        arView.session.remove(anchor: sessionAnchor)
-                    }
-                    anchorEntity.removeFromParent()
-                    self.parent.sceneManager.anchorEntities.removeAll { $0 === anchorEntity }
-                    self.parent.sceneManager.modelAnchorEntitiesByArtifactId[artifactId] = nil
-                }
-
-                if let fallbackEntity = self.parent.sceneManager.fallbackModelEntitiesByArtifactId[artifactId] {
-                    fallbackEntity.removeFromParent()
-                    self.parent.sceneManager.fallbackModelEntitiesByArtifactId[artifactId] = nil
-                    self.parent.sceneManager.fallbackRestoredModelArtifactIds.remove(artifactId)
-                }
-
-                if let id = UUID(uuidString: artifactId) {
-                    if let view = self.parent.sceneManager.annotationViews[id] {
-                        view.removeFromSuperview()
-                    }
-                    if let button = self.parent.sceneManager.deleteButtons[id] {
-                        button.removeFromSuperview()
-                    }
-                    if let anchor = self.parent.sceneManager.annotationAnchors[id] {
-                        arView.session.remove(anchor: anchor)
-                    }
-                    self.parent.sceneManager.annotationViews[id] = nil
-                    self.parent.sceneManager.deleteButtons[id] = nil
-                    self.parent.sceneManager.annotationAnchors[id] = nil
-                    self.parent.sceneManager.isEditing[id] = nil
-                    self.parent.sceneManager.hasBeenTapped[id] = nil
-                    self.parent.sceneManager.annotationColors[id] = nil
-                    if self.parent.sceneManager.activeAnnotationEditingId == id {
-                        self.parent.sceneManager.clearActiveAnnotationEditingState()
-                    }
-                    self.parent.sceneManager.fallbackRestoredAnnotationArtifactIds.remove(artifactId)
-                }
-
-                self.parent.removeArtifactOwnerBadge(artifactId: artifactId)
+                self.removeLocalArtifact(artifactId, from: arView)
             }
 
             notificationObservers.append(delete)
