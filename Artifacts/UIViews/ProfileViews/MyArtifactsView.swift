@@ -259,7 +259,8 @@ struct MyArtifactsView: View {
     }
 
     private func deleteArtifact(_ artifact: ArtifactMapItem) {
-        ArtifactsService.shared.deleteArtifact(artifactId: artifact.id)
+        let artifactIds = artifact.memberArtifactIds.isEmpty ? [artifact.id] : artifact.memberArtifactIds
+        artifactIds.forEach { ArtifactsService.shared.deleteArtifact(artifactId: $0) }
     }
 
     private func filterForeground(for filter: ArtifactFilter) -> Color {

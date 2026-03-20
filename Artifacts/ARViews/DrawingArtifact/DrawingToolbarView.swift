@@ -67,6 +67,7 @@ struct DrawingToolbarView: View {
                     DrawToolbarButton(icon: "checkmark",
                                       label: "Done",
                                       accent: true) {
+                        sceneManager.drawingManager.finishCurrentArtwork()
                         placementSettings.selectedTool = .none
                     }
                 }
@@ -233,4 +234,5 @@ private struct DrawToolbarButton: View {
 extension Notification.Name {
     static let undoLastDrawingStroke  = Notification.Name("UndoLastDrawingStroke")
     static let clearAllDrawingStrokes = Notification.Name("ClearAllDrawingStrokes")
+    static let clearSceneDrawings = Notification.Name("ClearSceneDrawings")
 }

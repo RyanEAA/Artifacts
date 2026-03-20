@@ -61,6 +61,12 @@ struct BrowseButtons: View {
 struct SceneButtons: View {
     @EnvironmentObject var sceneManager: SceneManager
 
+    private func seedLatestSceneSelectionIfUnset(_ meta: CloudSceneMeta) {
+        guard sceneManager.selectedCloudSceneId == nil else { return }
+        sceneManager.selectedCloudSceneId = meta.id
+        sceneManager.selectedCloudSceneStoragePath = meta.storagePath
+    }
+
     var body: some View {
         // SAVE (cloud)
         ControlButton(systemIconName: "icloud.and.arrow.up") {
@@ -163,8 +169,7 @@ struct SceneButtons: View {
                 case .success(let accessibleMeta):
                     if let meta = accessibleMeta {
                         DispatchQueue.main.async {
-                            self.sceneManager.selectedCloudSceneId = meta.id
-                            self.sceneManager.selectedCloudSceneStoragePath = meta.storagePath
+                            self.seedLatestSceneSelectionIfUnset(meta)
                         }
                         return
                     }
@@ -173,8 +178,7 @@ struct SceneButtons: View {
                         case .success(let ownMeta):
                             if let meta = ownMeta {
                                 DispatchQueue.main.async {
-                                    self.sceneManager.selectedCloudSceneId = meta.id
-                                    self.sceneManager.selectedCloudSceneStoragePath = meta.storagePath
+                                    self.seedLatestSceneSelectionIfUnset(meta)
                                 }
                             }
                         case .failure(let e):
@@ -188,8 +192,7 @@ struct SceneButtons: View {
                         case .success(let ownMeta):
                             if let meta = ownMeta {
                                 DispatchQueue.main.async {
-                                    self.sceneManager.selectedCloudSceneId = meta.id
-                                    self.sceneManager.selectedCloudSceneStoragePath = meta.storagePath
+                                    self.seedLatestSceneSelectionIfUnset(meta)
                                 }
                             }
                         case .failure(let ownError):
@@ -206,6 +209,8 @@ struct SceneButtons: View {
             guard !sceneManager.isPersistenceInProgress else { return }
             print("clear scene button pressed")
             let draftSceneId = sceneManager.selectedCloudSceneId
+            sceneManager.invalidateVisibleArtifactLoadCycle()
+            sceneManager.resetLoadArtifactFilters()
             for anchorEntity in sceneManager.anchorEntities {
                 print("Removing anchoEntity with id: \(String(describing: anchorEntity.anchorIdentifier)))")
                 anchorEntity.removeFromParent()
@@ -232,6 +237,8 @@ struct SceneButtons: View {
                 tv.removeFromSuperview()
             }
             sceneManager.annotationViews.removeAll()
+            sceneManager.annotationAnchors.removeAll()
+            sceneManager.locallyPlacedAnnotationIDs.removeAll()
             sceneManager.isEditing.removeAll()
             sceneManager.hasBeenTapped.removeAll()
             sceneManager.annotationColors.removeAll()
@@ -245,7 +252,7 @@ struct SceneButtons: View {
             sceneManager.artifactOwnerBadgeOwnerUids.removeAll()
 
             NotificationCenter.default.post(name: .clearAllAnnotations, object: nil)
-            NotificationCenter.default.post(name: .clearAllDrawingStrokes, object: nil)
+            NotificationCenter.default.post(name: .clearSceneDrawings, object: nil)
 
             if let draftSceneId, !draftSceneId.isEmpty {
                 Task {

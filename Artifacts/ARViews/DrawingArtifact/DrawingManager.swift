@@ -29,67 +29,84 @@ class DrawingManager: ObservableObject {
     // MARK: Brush settings
 
     @Published var brushColor: UIColor = .white
-    @Published var brushSize: Float   = 0.004   // sphere radius in metres (matches ARPaint default)
+    @Published var brushSize: Float   = 0.004   // stroke radius in metres
     @Published var drawMode: DrawMode = .air
 
     // MARK: Stroke tracking
 
     struct StrokeRecord {
         let artifactId: String
+        let artworkId: String
         let colorRGBA: SIMD4<Float>
         let brushSize: Float
-        var beads: [ModelEntity]
+        var entities: [ModelEntity]
         var points: [SIMD3<Float>]
     }
 
     /// Completed strokes — one finger drag with points and placed entities.
     private(set) var strokeGroups: [StrokeRecord] = []
 
-    /// Beads belonging to the stroke currently being drawn.
-    private(set) var activeStroke: [ModelEntity] = []
+    /// Render entities belonging to the stroke currently being drawn.
+    private(set) var activeStrokeEntities: [ModelEntity] = []
     private(set) var activeStrokePoints: [SIMD3<Float>] = []
     private var activeStrokeArtifactId: String?
+    private(set) var currentArtworkId: String?
     private var activeStrokeColorRGBA: SIMD4<Float> = SIMD4<Float>(1, 1, 1, 1)
     private var activeStrokeBrushSize: Float = 0.004
 
-    /// Last world-space bead position — used for gap-filling interpolation.
+    /// Last world-space stroke point — used for gap-filling interpolation.
     var previousPoint: SIMD3<Float>? = nil
     private var smoothedPoint: SIMD3<Float>? = nil
-    private let smoothingFactor: Float = 0.22
-    private(set) var totalBeadCount: Int = 0
-    private let maxBeadCount: Int = 3200
+    private let minSmoothingFactor: Float = 0.10
+    private let maxSmoothingFactor: Float = 0.24
+    private(set) var totalStrokeEntityCount: Int = 0
+    private let maxStrokeEntityCount: Int = 3200
 
     // MARK: Stroke lifecycle
 
     func beginStroke() {
-        activeStroke  = []
+        activeStrokeEntities = []
         activeStrokePoints = []
         activeStrokeArtifactId = UUID().uuidString
+        if currentArtworkId == nil {
+            currentArtworkId = UUID().uuidString
+        }
         activeStrokeColorRGBA = rgba(from: brushColor)
         activeStrokeBrushSize = brushSize
         previousPoint = nil
         smoothedPoint = nil
     }
 
-    func addBead(_ entity: ModelEntity, point: SIMD3<Float>) {
-        activeStroke.append(entity)
-        activeStrokePoints.append(point)
-        totalBeadCount += 1
+    func addStrokeEntity(_ entity: ModelEntity, endingAt point: SIMD3<Float>) {
+        activeStrokeEntities.append(entity)
+        if activeStrokePoints.isEmpty {
+            activeStrokePoints.append(point)
+        } else if activeStrokePoints.last != point {
+            activeStrokePoints.append(point)
+        }
+        totalStrokeEntityCount += 1
         trimIfNeeded()
+    }
+
+    func addStrokePoint(_ point: SIMD3<Float>) {
+        if activeStrokePoints.last != point {
+            activeStrokePoints.append(point)
+        }
     }
 
     @discardableResult
     func endStroke() -> StrokeRecord? {
-        guard !activeStroke.isEmpty else { return nil }
+        guard !activeStrokeEntities.isEmpty else { return nil }
         let record = StrokeRecord(
             artifactId: activeStrokeArtifactId ?? UUID().uuidString,
+            artworkId: currentArtworkId ?? UUID().uuidString,
             colorRGBA: activeStrokeColorRGBA,
             brushSize: activeStrokeBrushSize,
-            beads: activeStroke,
+            entities: activeStrokeEntities,
             points: activeStrokePoints
         )
         strokeGroups.append(record)
-        activeStroke  = []
+        activeStrokeEntities = []
         activeStrokePoints = []
         activeStrokeArtifactId = nil
         previousPoint = nil
@@ -101,92 +118,141 @@ class DrawingManager: ObservableObject {
     // MARK: Undo / Clear
 
     func undoLastStroke(in scene: RealityKit.Scene) -> String? {
-        guard let last = strokeGroups.popLast() else { return nil }
-        last.beads.forEach { $0.removeFromParent() }
-        totalBeadCount = max(0, totalBeadCount - last.beads.count)
+        guard let artworkId = currentArtworkId else { return nil }
+        let index = strokeGroups.lastIndex(where: { $0.artworkId == artworkId })
+        guard let index else { return nil }
+        let last = strokeGroups.remove(at: index)
+        last.entities.forEach { $0.removeFromParent() }
+        totalStrokeEntityCount = max(0, totalStrokeEntityCount - last.entities.count)
         objectWillChange.send()
         return last.artifactId
     }
 
     func clearAll(in scene: RealityKit.Scene) {
-        (strokeGroups.flatMap { $0.beads } + activeStroke).forEach { $0.removeFromParent() }
+        (strokeGroups.flatMap { $0.entities } + activeStrokeEntities).forEach { $0.removeFromParent() }
         strokeGroups.removeAll()
-        activeStroke  = []
+        activeStrokeEntities = []
         activeStrokePoints = []
         activeStrokeArtifactId = nil
+        currentArtworkId = nil
         previousPoint = nil
         smoothedPoint = nil
-        totalBeadCount = 0
+        totalStrokeEntityCount = 0
         objectWillChange.send()
+    }
+
+    func clearCurrentArtwork(in scene: RealityKit.Scene) -> [String] {
+        let artworkId = currentArtworkId
+
+        let removedArtifactIds = strokeGroups
+            .filter { record in
+                guard let artworkId else { return false }
+                return record.artworkId == artworkId
+            }
+            .map(\.artifactId)
+
+        strokeGroups.removeAll { record in
+            guard let artworkId else { return false }
+            if record.artworkId == artworkId {
+                record.entities.forEach { $0.removeFromParent() }
+                totalStrokeEntityCount = max(0, totalStrokeEntityCount - record.entities.count)
+                return true
+            }
+            return false
+        }
+
+        activeStrokeEntities.forEach { $0.removeFromParent() }
+        totalStrokeEntityCount = max(0, totalStrokeEntityCount - activeStrokeEntities.count)
+        activeStrokeEntities = []
+        activeStrokePoints = []
+        activeStrokeArtifactId = nil
+        currentArtworkId = nil
+        previousPoint = nil
+        smoothedPoint = nil
+        objectWillChange.send()
+        return removedArtifactIds
     }
 
     @discardableResult
     func removeStroke(artifactId: String, in scene: RealityKit.Scene) -> Bool {
         guard let index = strokeGroups.firstIndex(where: { $0.artifactId == artifactId }) else { return false }
         let stroke = strokeGroups.remove(at: index)
-        stroke.beads.forEach { $0.removeFromParent() }
-        totalBeadCount = max(0, totalBeadCount - stroke.beads.count)
+        stroke.entities.forEach { $0.removeFromParent() }
+        totalStrokeEntityCount = max(0, totalStrokeEntityCount - stroke.entities.count)
         objectWillChange.send()
         return true
     }
 
-    var canUndo: Bool { !strokeGroups.isEmpty }
+    var canUndo: Bool {
+        guard let artworkId = currentArtworkId else { return false }
+        return strokeGroups.contains(where: { $0.artworkId == artworkId })
+    }
 
     func appendRestoredStroke(
         artifactId: String,
+        artworkId: String,
         colorRGBA: SIMD4<Float>,
         brushSize: Float,
-        beads: [ModelEntity],
+        entities: [ModelEntity],
         points: [SIMD3<Float>]
     ) {
-        guard !beads.isEmpty else { return }
+        guard !entities.isEmpty else { return }
         strokeGroups.append(
             StrokeRecord(
                 artifactId: artifactId,
+                artworkId: artworkId,
                 colorRGBA: colorRGBA,
                 brushSize: brushSize,
-                beads: beads,
+                entities: entities,
                 points: points
             )
         )
-        totalBeadCount += beads.count
+        totalStrokeEntityCount += entities.count
         trimIfNeeded()
         objectWillChange.send()
     }
 
-    func smoothPoint(_ raw: SIMD3<Float>) -> SIMD3<Float> {
+    func finishCurrentArtwork() {
+        currentArtworkId = nil
+    }
+
+    func smoothPoint(_ raw: SIMD3<Float>, responsiveness: Float? = nil) -> SIMD3<Float> {
         guard let prev = smoothedPoint else {
             smoothedPoint = raw
             return raw
         }
-        let next = simd_mix(prev, raw, SIMD3<Float>(repeating: smoothingFactor))
+        let blend = min(
+            max(responsiveness ?? maxSmoothingFactor, minSmoothingFactor),
+            maxSmoothingFactor
+        )
+        let next = simd_mix(prev, raw, SIMD3<Float>(repeating: blend))
         smoothedPoint = next
         return next
     }
 
     private func trimIfNeeded() {
-        while totalBeadCount > maxBeadCount {
+        while totalStrokeEntityCount > maxStrokeEntityCount {
             if !strokeGroups.isEmpty {
-                if strokeGroups[0].beads.isEmpty {
+                if strokeGroups[0].entities.isEmpty {
                     strokeGroups.removeFirst()
                     continue
                 }
-                let removed = strokeGroups[0].beads.removeFirst()
+                let removed = strokeGroups[0].entities.removeFirst()
                 removed.removeFromParent()
-                totalBeadCount -= 1
+                totalStrokeEntityCount -= 1
                 if !strokeGroups[0].points.isEmpty {
                     strokeGroups[0].points.removeFirst()
                 }
-                if strokeGroups[0].beads.isEmpty {
+                if strokeGroups[0].entities.isEmpty {
                     strokeGroups.removeFirst()
                 }
                 continue
             }
 
-            if !activeStroke.isEmpty {
-                let removed = activeStroke.removeFirst()
+            if !activeStrokeEntities.isEmpty {
+                let removed = activeStrokeEntities.removeFirst()
                 removed.removeFromParent()
-                totalBeadCount -= 1
+                totalStrokeEntityCount -= 1
                 if !activeStrokePoints.isEmpty {
                     activeStrokePoints.removeFirst()
                 }

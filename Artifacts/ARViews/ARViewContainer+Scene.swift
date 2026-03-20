@@ -10,27 +10,8 @@ import FirebaseAuth
 import QuartzCore
 
 extension ARViewContainer {
-
-    private func isChameleonModelName(_ modelName: String?) -> Bool {
-        guard let modelName = modelName?.lowercased() else { return false }
-        return modelName.contains("chameleon") || modelName.contains("chamelon")
-    }
-
-    private func adjustedModelBounds(for modelEntity: ModelEntity, modelName: String?) -> BoundingBox {
-        let bounds = modelEntity.visualBounds(relativeTo: nil)
-        guard isChameleonModelName(modelName) else {
-            return bounds
-        }
-
-        let shift = bounds.extents.x * 0.18
-        return BoundingBox(
-            min: SIMD3<Float>(bounds.min.x - shift, bounds.min.y, bounds.min.z),
-            max: SIMD3<Float>(bounds.max.x - shift, bounds.max.y, bounds.max.z)
-        )
-    }
-
     func modelBadgeWorldPosition(for modelEntity: ModelEntity, modelName: String? = nil) -> SIMD3<Float> {
-        let bounds = adjustedModelBounds(for: modelEntity, modelName: modelName)
+        let bounds = modelEntity.visualBounds(relativeTo: nil)
         return SIMD3<Float>(
             bounds.center.x,
             bounds.center.y + (bounds.extents.y * 0.5) + 0.02,
@@ -39,11 +20,11 @@ extension ARViewContainer {
     }
 
     func modelCenterWorldPosition(for modelEntity: ModelEntity, modelName: String? = nil) -> SIMD3<Float> {
-        adjustedModelBounds(for: modelEntity, modelName: modelName).center
+        modelEntity.visualBounds(relativeTo: nil).center
     }
 
     func writableSceneIdForArtifactWrites() async throws -> String {
-        let preferred = self.sceneManager.selectedCloudSceneId
+        let preferred = self.sceneManager.pendingArtifactSceneId ?? self.sceneManager.selectedCloudSceneId
 
         let resolution = try await withCheckedThrowingContinuation { continuation in
             CloudSceneStore.resolveWritableSceneId(preferredSceneId: preferred) { result in
@@ -51,8 +32,9 @@ extension ARViewContainer {
             }
         }
 
-        self.sceneManager.selectedCloudSceneId = resolution.sceneId
-        self.sceneManager.selectedCloudSceneStoragePath = nil
+        if self.sceneManager.selectedCloudSceneId == nil || self.sceneManager.selectedCloudSceneId != resolution.sceneId {
+            self.sceneManager.pendingArtifactSceneId = resolution.sceneId
+        }
 
         try await withCheckedThrowingContinuation { continuation in
             CloudSceneStore.ensureSceneDocumentExists(sceneId: resolution.sceneId) { result in
@@ -64,12 +46,14 @@ extension ARViewContainer {
     }
 
     func currentSceneIdForArtifacts() -> String {
+        if let id = self.sceneManager.pendingArtifactSceneId, !id.isEmpty {
+            return id
+        }
         if let id = self.sceneManager.selectedCloudSceneId, !id.isEmpty {
             return id
         }
         let newId = UUID().uuidString
-        self.sceneManager.selectedCloudSceneId = newId
-        self.sceneManager.selectedCloudSceneStoragePath = nil
+        self.sceneManager.pendingArtifactSceneId = newId
         return newId
     }
 

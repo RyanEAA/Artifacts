@@ -27,6 +27,7 @@ class SceneManager: ObservableObject {
     var shouldLoadSceneFromCloud: Bool = false
     var selectedCloudSceneId: String?
     var selectedCloudSceneStoragePath: String?
+    var pendingArtifactSceneId: String?
     var selectedSceneOwnerUid: String?
 
     lazy var persistenceUrl: URL = {
@@ -58,8 +59,10 @@ class SceneManager: ObservableObject {
     var artifactOwnerBadgeOwnerUids: [String: String] = [:]
     var artifactOwnerUsernames: [String: String] = [:]
     var artifactOwnerUsernameLookupsInFlight: Set<String> = []
+    var drawingBadgeMembersById: [String: [String]] = [:]
 
     var annotationAnchors: [UUID: ARAnchor] = [:]
+    var locallyPlacedAnnotationIDs: Set<UUID> = []
     var isEditing: [UUID: Bool] = [:]
     var hasBeenTapped: [UUID: Bool] = [:]
     var annotationColors: [UUID: UIColor] = [:]
@@ -73,10 +76,10 @@ class SceneManager: ObservableObject {
     /// Owns brush color, brush size, stroke history, and undo logic.
     var drawingManager: DrawingManager = DrawingManager()
 
-    /// Single world-space anchor that parents all draw bead entities.
-    /// Created lazily on the first bead placed.
+    /// Single world-space anchor that parents all stroke entities.
+    /// Created lazily on the first stroke geometry placed.
     var drawAnchorEntity: AnchorEntity? = nil
-    var drawingBeadPrototypeCache: [String: ModelEntity] = [:]
+    var drawingStrokePrototypeCache: [String: ModelEntity] = [:]
     var fallbackArtifactAnchorEntity: AnchorEntity? = nil
     var fallbackRestoredModelArtifactIds: Set<String> = []
     var fallbackRestoredAnnotationArtifactIds: Set<String> = []
@@ -103,12 +106,14 @@ class SceneManager: ObservableObject {
     private var persistenceNoticeWorkItem: DispatchWorkItem?
     private var loadVisibilityTimeoutWorkItem: DispatchWorkItem?
     private var loadFilterResetWorkItem: DispatchWorkItem?
+    private(set) var visibleArtifactLoadToken: UUID = UUID()
     private var expectedRestoredModelCount: Int = 0
     private var expectedRestoredAnnotationCount: Int = 0
     private var expectedRestoredDrawingCount: Int = 0
     private var restoredModelCount: Int = 0
     private var restoredAnnotationCount: Int = 0
     private var restoredDrawingCount: Int = 0
+    private var isLoadRelocalizationSatisfied: Bool = true
 
     static var defaultAnnotationColor: UIColor {
         UIColor(named: "MintGreen") ?? .systemMint
@@ -190,6 +195,23 @@ class SceneManager: ObservableObject {
         isLoadArtifactFilterActive = false
     }
 
+    @discardableResult
+    func beginVisibleArtifactLoadCycle() -> UUID {
+        let token = UUID()
+        visibleArtifactLoadToken = token
+        return token
+    }
+
+    func invalidateVisibleArtifactLoadCycle() {
+        visibleArtifactLoadToken = UUID()
+        loadVisibilityTimeoutWorkItem?.cancel()
+        loadVisibilityTimeoutWorkItem = nil
+        loadFilterResetWorkItem?.cancel()
+        loadFilterResetWorkItem = nil
+        isAwaitingVisibleArtifactsAfterLoad = false
+        onVisibleArtifactsReady = nil
+    }
+
     func beginPersistenceProgress(_ text: String) {
         DispatchQueue.main.async {
             self.isPersistenceInProgress = true
@@ -235,6 +257,7 @@ class SceneManager: ObservableObject {
             self.restoredModelCount = 0
             self.restoredAnnotationCount = 0
             self.restoredDrawingCount = 0
+            self.isLoadRelocalizationSatisfied = false
 
             if self.expectedRestoredModelCount + self.expectedRestoredAnnotationCount + self.expectedRestoredDrawingCount == 0 {
                 self.isAwaitingVisibleArtifactsAfterLoad = false
@@ -255,8 +278,10 @@ class SceneManager: ObservableObject {
             self.isAwaitingVisibleArtifactsAfterLoad = false
             self.onVisibleArtifactsReady?()
             self.scheduleLoadFilterReset()
-            self.endPersistenceProgress()
-            self.postPersistenceNotice("Scene loaded and artifacts restored.", style: .success)
+            DispatchQueue.main.async {
+                self.endPersistenceProgress()
+                self.postPersistenceNotice("Scene loaded and artifacts restored.", style: .success)
+            }
         }
     }
 
@@ -313,7 +338,7 @@ class SceneManager: ObservableObject {
         let annotationsDone = self.restoredAnnotationCount >= self.expectedRestoredAnnotationCount
         let drawingsDone = self.restoredDrawingCount >= self.expectedRestoredDrawingCount
 
-        if modelsDone && annotationsDone && drawingsDone {
+        if modelsDone && annotationsDone && drawingsDone && self.isLoadRelocalizationSatisfied {
             self.completeAwaitingVisibleArtifactsAfterLoadIfNeeded()
         }
     }
@@ -322,6 +347,30 @@ class SceneManager: ObservableObject {
         let modelsDone = self.restoredModelCount >= self.expectedRestoredModelCount
         let annotationsDone = self.restoredAnnotationCount >= self.expectedRestoredAnnotationCount
         return modelsDone && annotationsDone
+    }
+
+    func isAwaitingOnlyDrawingsAfterLoad() -> Bool {
+        isAwaitingVisibleArtifactsAfterLoad
+            && expectedRestoredModelCount == 0
+            && expectedRestoredAnnotationCount == 0
+            && expectedRestoredDrawingCount > 0
+    }
+
+    func updateLoadRelocalizationState(for trackingState: ARCamera.TrackingState) {
+        DispatchQueue.main.async {
+            guard self.isAwaitingVisibleArtifactsAfterLoad else { return }
+
+            switch trackingState {
+            case .normal:
+                self.isLoadRelocalizationSatisfied = true
+            case .limited(.relocalizing):
+                self.isLoadRelocalizationSatisfied = false
+            default:
+                break
+            }
+
+            self.evaluateAwaitingLoadCompletion()
+        }
     }
 
     private func scheduleLoadFilterReset(after seconds: TimeInterval = 2.0) {

@@ -7,6 +7,7 @@ import RealityKit
 import ARKit
 import Foundation
 import FirebaseAuth
+import FirebaseFirestore
 
 extension ARViewContainer {
 
@@ -146,8 +147,13 @@ extension ARViewContainer {
     private func saveToCloud(arView: CustomARView) {
         self.sceneManager.shouldSaveSceneToCloud = false
         self.sceneManager.beginPersistenceProgress("Saving scene...")
+        let previousSceneId = self.sceneManager.selectedCloudSceneId
+        let previousArtifactSceneId = self.sceneManager.pendingArtifactSceneId
+        let previousStoragePath = self.sceneManager.selectedCloudSceneStoragePath
 
-        CloudSceneStore.resolveWritableSceneId(preferredSceneId: self.sceneManager.selectedCloudSceneId) { result in
+        CloudSceneStore.resolveWritableSceneId(
+            preferredSceneId: self.sceneManager.pendingArtifactSceneId ?? self.sceneManager.selectedCloudSceneId
+        ) { result in
             switch result {
             case .failure(let error):
                 print("Failed to resolve writable scene id:", error.localizedDescription)
@@ -159,12 +165,92 @@ extension ARViewContainer {
             case .success(let resolution):
                 let targetSceneId = resolution.sceneId
                 let remappedFromSceneId = resolution.remappedFromSceneId
-                self.sceneManager.selectedCloudSceneId = targetSceneId
-                self.sceneManager.selectedCloudSceneStoragePath = nil
+                let sourceSceneIdForVisibility = remappedFromSceneId
+                    ?? ((previousSceneId != nil && previousSceneId != targetSceneId) ? previousSceneId : nil)
+                let shouldReuseSourceWorldMap = sourceSceneIdForVisibility != nil
 
-                arView.session.getCurrentWorldMap { map, err in
-                    guard let map = map else {
-                        print("No world map:", err?.localizedDescription ?? "unknown error")
+                let finishSave: (Data) -> Void = { data in
+                    CloudSceneStore.save(data: data, sceneId: targetSceneId) { saveResult in
+                        switch saveResult {
+                        case .failure(let error):
+                            print("Cloud save failed:", error)
+                            self.sceneManager.endPersistenceProgress()
+                            self.sceneManager.postPersistenceNotice(
+                                "Cloud save failed. Please try again.",
+                                style: .error
+                            )
+                        case .success(let savedId):
+                            Task {
+                                do {
+                                    let savedSceneRef = CloudSceneStore.db.collection("scenes").document(savedId)
+                                    let savedSceneSnapshot = try await savedSceneRef.getDocument()
+                                    let savedStoragePath = savedSceneSnapshot.data()?["storagePath"] as? String
+                                    let existingVisibleSceneIds = savedSceneSnapshot.data()?["visibleSceneIds"] as? [String] ?? []
+                                    if let sourceSceneIdForVisibility, sourceSceneIdForVisibility != savedId {
+                                        let oldSceneSnapshot = try await CloudSceneStore.db.collection("scenes").document(sourceSceneIdForVisibility).getDocument()
+                                        let inheritedVisibleSceneIds = oldSceneSnapshot.data()?["visibleSceneIds"] as? [String] ?? []
+                                        let mergedVisibleSceneIds = Array(Set(existingVisibleSceneIds + inheritedVisibleSceneIds + [savedId, sourceSceneIdForVisibility])).sorted()
+                                        try await savedSceneRef.setData([
+                                            "visibleSceneIds": mergedVisibleSceneIds,
+                                            "sourceSceneId": sourceSceneIdForVisibility,
+                                            "updatedAt": Timestamp(date: Date())
+                                        ], merge: true)
+                                    } else if existingVisibleSceneIds.isEmpty {
+                                        try await savedSceneRef.setData([
+                                            "visibleSceneIds": [savedId],
+                                            "updatedAt": Timestamp(date: Date())
+                                        ], merge: true)
+                                    }
+                                    try await self.flushArtifactPersistenceBeforeSceneSave(sceneId: savedId)
+                                    let draftSceneIdToRemap = remappedFromSceneId
+                                        ?? ((previousArtifactSceneId != nil
+                                             && previousArtifactSceneId != savedId
+                                             && previousArtifactSceneId != previousSceneId)
+                                            ? previousArtifactSceneId
+                                            : nil)
+                                    if let oldSceneId = draftSceneIdToRemap, oldSceneId != savedId {
+                                        try await ArtifactsService.shared.remapMyDraftArtifacts(
+                                            fromSceneId: oldSceneId,
+                                            toSceneId: savedId
+                                        )
+                                    }
+                                    try await ArtifactsService.shared.publishDraftArtifacts(sceneId: savedId)
+                                    self.sceneManager.selectedCloudSceneId = savedId
+                                    self.sceneManager.selectedCloudSceneStoragePath = savedStoragePath
+                                    self.sceneManager.pendingArtifactSceneId = nil
+                                    print("✅ Published draft artifacts for scene:", savedId)
+                                    self.sceneManager.endPersistenceProgress()
+                                    self.sceneManager.postPersistenceNotice(
+                                        "Scene saved successfully.",
+                                        style: .success
+                                    )
+                                } catch {
+                                    print("⚠️ publish/remap error:", error.localizedDescription)
+                                    self.sceneManager.endPersistenceProgress()
+                                    self.sceneManager.postPersistenceNotice(
+                                        "Scene saved, but publishing artifacts failed.",
+                                        style: .info
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let fallbackToExistingMap: () -> Void = {
+                    let fallbackSceneId = sourceSceneIdForVisibility ?? previousSceneId
+                    let fallbackStoragePath = previousStoragePath
+
+                    let loadExistingMap: (@escaping (Result<Data, Error>) -> Void) -> Void
+                    if let fallbackStoragePath, !fallbackStoragePath.isEmpty {
+                        loadExistingMap = { completion in
+                            CloudSceneStore.load(storagePath: fallbackStoragePath, completion: completion)
+                        }
+                    } else if let fallbackSceneId, !fallbackSceneId.isEmpty {
+                        loadExistingMap = { completion in
+                            CloudSceneStore.load(sceneId: fallbackSceneId, completion: completion)
+                        }
+                    } else {
                         self.sceneManager.endPersistenceProgress()
                         self.sceneManager.postPersistenceNotice(
                             "Could not save scene map. Try scanning more of the area and try again.",
@@ -172,48 +258,40 @@ extension ARViewContainer {
                         )
                         return
                     }
+
+                    loadExistingMap { loadResult in
+                        switch loadResult {
+                        case .success(let existingMapData):
+                            print("⚠️ Reusing existing scene map because ARKit did not provide a fresh world map.")
+                            finishSave(existingMapData)
+                        case .failure(let error):
+                            print("Cloud map fallback failed:", error.localizedDescription)
+                            self.sceneManager.endPersistenceProgress()
+                            self.sceneManager.postPersistenceNotice(
+                                "Could not save scene map. Try scanning more of the area and try again.",
+                                style: .error
+                            )
+                        }
+                    }
+                }
+
+                if shouldReuseSourceWorldMap {
+                    fallbackToExistingMap()
+                    return
+                }
+
+                arView.session.getCurrentWorldMap { map, err in
+                    guard let map = map else {
+                        print("No world map:", err?.localizedDescription ?? "unknown error")
+                        fallbackToExistingMap()
+                        return
+                    }
                     do {
                         let data = try NSKeyedArchiver.archivedData(
                             withRootObject: map,
                             requiringSecureCoding: true
                         )
-                        CloudSceneStore.save(data: data, sceneId: targetSceneId) { saveResult in
-                            switch saveResult {
-                            case .failure(let error):
-                                print("Cloud save failed:", error)
-                                self.sceneManager.endPersistenceProgress()
-                                self.sceneManager.postPersistenceNotice(
-                                    "Cloud save failed. Please try again.",
-                                    style: .error
-                                )
-                            case .success(let savedId):
-                                Task {
-                                    do {
-                                        try await self.flushArtifactPersistenceBeforeSceneSave(sceneId: savedId)
-                                        if let oldSceneId = remappedFromSceneId, oldSceneId != savedId {
-                                            try await ArtifactsService.shared.remapMyDraftArtifacts(
-                                                fromSceneId: oldSceneId,
-                                                toSceneId: savedId
-                                            )
-                                        }
-                                        try await ArtifactsService.shared.publishDraftArtifacts(sceneId: savedId)
-                                        print("✅ Published draft artifacts for scene:", savedId)
-                                        self.sceneManager.endPersistenceProgress()
-                                        self.sceneManager.postPersistenceNotice(
-                                            "Scene saved successfully.",
-                                            style: .success
-                                        )
-                                    } catch {
-                                        print("⚠️ publish/remap error:", error.localizedDescription)
-                                        self.sceneManager.endPersistenceProgress()
-                                        self.sceneManager.postPersistenceNotice(
-                                            "Scene saved, but publishing artifacts failed.",
-                                            style: .info
-                                        )
-                                    }
-                                }
-                            }
-                        }
+                        finishSave(data)
                     } catch {
                         print("Archive error:", error)
                         self.sceneManager.endPersistenceProgress()
@@ -230,8 +308,10 @@ extension ARViewContainer {
     private func loadFromCloud(arView: CustomARView) {
         self.sceneManager.shouldLoadSceneFromCloud = false
         self.sceneManager.beginPersistenceProgress("Loading scene...")
+        let loadToken = self.sceneManager.beginVisibleArtifactLoadCycle()
         self.sceneManager.stopAnnotationTextListener()
         self.sceneManager.selectedSceneOwnerUid = nil
+        self.sceneManager.pendingArtifactSceneId = nil
         self.sceneManager.resetLoadArtifactFilters()
         self.sceneManager.anchorEntities.removeAll(keepingCapacity: true)
         self.sceneManager.modelAnchorEntitiesByArtifactId.removeAll(keepingCapacity: true)
@@ -258,6 +338,7 @@ extension ARViewContainer {
         self.sceneManager.annotationViews.removeAll(keepingCapacity: true)
         self.sceneManager.deleteButtons.removeAll(keepingCapacity: true)
         self.sceneManager.annotationAnchors.removeAll(keepingCapacity: true)
+        self.sceneManager.locallyPlacedAnnotationIDs.removeAll(keepingCapacity: true)
         self.sceneManager.isEditing.removeAll(keepingCapacity: true)
         self.sceneManager.hasBeenTapped.removeAll(keepingCapacity: true)
         self.sceneManager.annotationColors.removeAll(keepingCapacity: true)
@@ -327,7 +408,9 @@ extension ARViewContainer {
                                 expectedDrawings: drawingCount
                             )
                             ScenePersistenceHelper.loadScene(for: arView, with: data)
-                            self.restoreDrawingsAfterRelocalization(sceneId: id, in: arView)
+                            self.restoreVisibleModelsAndAnnotationsFromCloud(sceneId: id, in: arView, loadToken: loadToken)
+                            self.scheduleVisibleArtifactRestoreRetries(sceneId: id, in: arView, loadToken: loadToken)
+                            self.restoreDrawingsAfterRelocalization(sceneId: id, in: arView, loadToken: loadToken)
                             self.sceneManager.startLoadVisibilityTimeout()
                         }
                     }
@@ -381,7 +464,9 @@ extension ARViewContainer {
                             expectedDrawings: drawingCount
                         )
                         ScenePersistenceHelper.loadScene(for: arView, with: data)
-                        self.restoreDrawingsAfterRelocalization(sceneId: sceneId, in: arView)
+                        self.restoreVisibleModelsAndAnnotationsFromCloud(sceneId: sceneId, in: arView, loadToken: loadToken)
+                        self.scheduleVisibleArtifactRestoreRetries(sceneId: sceneId, in: arView, loadToken: loadToken)
+                        self.restoreDrawingsAfterRelocalization(sceneId: sceneId, in: arView, loadToken: loadToken)
                         self.sceneManager.startLoadVisibilityTimeout()
                     }
                     self.startRealtimeAnnotationSyncIfNeeded(on: arView)
@@ -480,6 +565,14 @@ extension ARViewContainer {
     }
 
     func restoreVisibleModelsAndAnnotationsFromCloud(sceneId: String, in arView: ARView) {
+        restoreVisibleModelsAndAnnotationsFromCloud(
+            sceneId: sceneId,
+            in: arView,
+            loadToken: self.sceneManager.visibleArtifactLoadToken
+        )
+    }
+
+    func restoreVisibleModelsAndAnnotationsFromCloud(sceneId: String, in arView: ARView, loadToken: UUID) {
         guard !sceneId.isEmpty else { return }
 
         Task {
@@ -489,6 +582,7 @@ extension ARViewContainer {
                 let (modelRecords, annotationRecords) = try await (modelsTask, annotationsTask)
 
                 await MainActor.run {
+                    guard self.sceneManager.visibleArtifactLoadToken == loadToken else { return }
                     for record in modelRecords {
                         self.placeFallbackModel(record, in: arView)
                     }
@@ -498,7 +592,11 @@ extension ARViewContainer {
                         guard let id = UUID(uuidString: record.artifactId) else { continue }
                         guard self.sceneManager.annotationViews[id] == nil else { continue }
 
-                        let payload = AnnotationData(id: id, text: record.annotationText)
+                        let payload = AnnotationData(
+                            id: id,
+                            text: record.annotationText,
+                            colorHex: record.annotationColorHex
+                        )
                         let name = annotationNamePrefix + self.encodeAnnotation(payload)
                         let anchor = ARAnchor(name: name, transform: record.transform)
                         self.attachAnnotationView(for: anchor, data: payload, on: arView)
@@ -519,6 +617,18 @@ extension ARViewContainer {
                 }
             } catch {
                 print("⚠️ restoreVisibleModelsAndAnnotationsFromCloud error:", error.localizedDescription)
+            }
+        }
+    }
+
+    private func scheduleVisibleArtifactRestoreRetries(sceneId: String, in arView: ARView, loadToken: UUID) {
+        let retryDelays: [TimeInterval] = [0.6, 1.4, 2.6]
+        for delay in retryDelays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard self.sceneManager.visibleArtifactLoadToken == loadToken else { return }
+                guard self.sceneManager.selectedCloudSceneId == sceneId else { return }
+                guard self.sceneManager.isAwaitingVisibleArtifactsAfterLoad else { return }
+                self.restoreVisibleModelsAndAnnotationsFromCloud(sceneId: sceneId, in: arView, loadToken: loadToken)
             }
         }
     }

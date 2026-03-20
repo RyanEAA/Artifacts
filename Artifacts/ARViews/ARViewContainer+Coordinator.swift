@@ -57,8 +57,14 @@ extension ARViewContainer {
             for anchor in anchors {
                 // Annotation anchors
                 if let name = anchor.name, name.hasPrefix(annotationNamePrefix) {
+                    if parent.sceneManager.isLoadArtifactFilterActive {
+                        continue
+                    }
                     let base64 = String(name.dropFirst(annotationNamePrefix.count))
                     if var data = parent.decodeAnnotation(from: base64) {
+                        if parent.sceneManager.locallyPlacedAnnotationIDs.remove(data.id) != nil {
+                            continue
+                        }
                         if parent.sceneManager.isLoadArtifactFilterActive,
                            !parent.sceneManager.loadVisibleAnnotationArtifactIDs.contains(data.id.uuidString) {
                             continue
@@ -90,6 +96,9 @@ extension ARViewContainer {
                 }
                 // Model anchors
                 if let anchorName = anchor.name, anchorName.hasPrefix(anchorNamePrefix) {
+                    if parent.sceneManager.isLoadArtifactFilterActive {
+                        continue
+                    }
                     if self.parent.sceneManager.locallyPlacedModelAnchorIDs.remove(anchor.identifier) != nil {
                         continue
                     }
@@ -100,6 +109,16 @@ extension ARViewContainer {
                         transform: anchor.transform
                     )
                     if self.parent.sceneManager.isLoadArtifactFilterActive, matchedRecord == nil {
+                        continue
+                    }
+                    if let artifactId = matchedRecord?.artifactId {
+                        if self.parent.sceneManager.fallbackRestoredModelArtifactIds.contains(artifactId)
+                            || self.parent.sceneManager.modelAnchorEntitiesByArtifactId[artifactId] != nil
+                            || self.parent.sceneManager.fallbackModelEntitiesByArtifactId[artifactId] != nil {
+                            continue
+                        }
+                    }
+                    if self.hasEquivalentPlacedModel(named: String(modelName), transform: anchor.transform) {
                         continue
                     }
                     guard let model = parent.modelsViewModel.models
@@ -135,6 +154,46 @@ extension ARViewContainer {
                     }
                 }
             }
+        }
+
+        private func hasEquivalentPlacedModel(named modelName: String, transform: simd_float4x4) -> Bool {
+            let targetPosition = SIMD3<Float>(
+                transform.columns.3.x,
+                transform.columns.3.y,
+                transform.columns.3.z
+            )
+
+            for (artifactId, anchorEntity) in parent.sceneManager.modelAnchorEntitiesByArtifactId {
+                guard parent.sceneManager.modelArtifactNamesById[artifactId] == modelName else { continue }
+                let existingTransform = anchorEntity.transformMatrix(relativeTo: nil)
+                let existingPosition = SIMD3<Float>(
+                    existingTransform.columns.3.x,
+                    existingTransform.columns.3.y,
+                    existingTransform.columns.3.z
+                )
+                if simd_distance(existingPosition, targetPosition) < 0.08 {
+                    return true
+                }
+            }
+
+            for (artifactId, entity) in parent.sceneManager.fallbackModelEntitiesByArtifactId {
+                guard parent.sceneManager.modelArtifactNamesById[artifactId] == modelName else { continue }
+                let existingTransform = entity.transformMatrix(relativeTo: nil)
+                let existingPosition = SIMD3<Float>(
+                    existingTransform.columns.3.x,
+                    existingTransform.columns.3.y,
+                    existingTransform.columns.3.z
+                )
+                if simd_distance(existingPosition, targetPosition) < 0.08 {
+                    return true
+                }
+            }
+
+            return false
+        }
+
+        func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
+            parent.sceneManager.updateLoadRelocalizationState(for: camera.trackingState)
         }
 
         // MARK: - ARSessionDelegate: Frame Update (drives smooth drawing)
@@ -181,6 +240,7 @@ extension ARViewContainer {
             if let anchor = parent.sceneManager.annotationAnchors[id] {
                 arView.session.remove(anchor: anchor)
             }
+            parent.sceneManager.locallyPlacedAnnotationIDs.remove(id)
             parent.sceneManager.annotationViews[id]   = nil
             parent.sceneManager.deleteButtons[id]     = nil
             parent.sceneManager.annotationAnchors[id] = nil
@@ -201,21 +261,27 @@ extension ARViewContainer {
         @objc func handleQuickDeleteButton(_ sender: UIButton) {
             guard let arView = arView else { return }
             guard let artifactId = parent.sceneManager.selectedArtifactForQuickDelete else { return }
+            let drawingArtifactIds = parent.sceneManager.drawingBadgeMembersById[artifactId] ?? []
             let modelDeletionContext = modelDeletionContext(for: artifactId)
             parent.hideQuickDeleteButton()
-            parent.sceneManager.deletedArtifactIds.insert(artifactId)
-            parent.sceneManager.pendingArtifactSaveTasks[artifactId]?.cancel()
-            parent.sceneManager.pendingArtifactSaveTasks[artifactId] = nil
+            let artifactIdsToDelete = drawingArtifactIds.isEmpty ? [artifactId] : drawingArtifactIds
+            for id in artifactIdsToDelete {
+                parent.sceneManager.deletedArtifactIds.insert(id)
+                parent.sceneManager.pendingArtifactSaveTasks[id]?.cancel()
+                parent.sceneManager.pendingArtifactSaveTasks[id] = nil
+            }
             removeLocalArtifact(artifactId, from: arView)
             Task {
-                if let modelDeletionContext {
+                if drawingArtifactIds.isEmpty, let modelDeletionContext {
                     try? await ArtifactsService.shared.deleteMyDraftModelArtifact(
                         sceneId: modelDeletionContext.sceneId,
                         modelName: modelDeletionContext.modelName,
                         transform: modelDeletionContext.transform
                     )
                 }
-                ArtifactsService.shared.deleteArtifact(artifactId: artifactId)
+                for id in artifactIdsToDelete {
+                    ArtifactsService.shared.deleteArtifact(artifactId: id)
+                }
             }
         }
 
@@ -248,9 +314,14 @@ extension ARViewContainer {
             }
 
             for stroke in parent.sceneManager.drawingManager.strokeGroups {
-                if stroke.beads.contains(where: {
+                if stroke.entities.contains(where: {
                     entity === $0 || isEntity(entity, descendantOf: $0) || isEntity($0, descendantOf: entity)
                 }) {
+                    if let drawingClusterId = parent.sceneManager.drawingBadgeMembersById.first(where: { _, members in
+                        members.contains(stroke.artifactId)
+                    })?.key {
+                        return drawingClusterId
+                    }
                     return stroke.artifactId
                 }
             }
@@ -259,6 +330,17 @@ extension ARViewContainer {
         }
 
         private func removeLocalArtifact(_ artifactId: String, from arView: ARView) {
+            if let drawingArtifactIds = self.parent.sceneManager.drawingBadgeMembersById[artifactId], !drawingArtifactIds.isEmpty {
+                let memberIds = drawingArtifactIds
+                self.parent.removeArtifactOwnerBadge(artifactId: artifactId)
+                self.parent.sceneManager.drawingBadgeMembersById[artifactId] = nil
+                for memberId in memberIds {
+                    removeLocalArtifact(memberId, from: arView)
+                }
+                self.parent.syncDrawingOwnerBadges(on: arView)
+                return
+            }
+
             self.parent.sceneManager.loadVisibleModelRecords.removeAll { $0.artifactId == artifactId }
             self.parent.sceneManager.loadVisibleAnnotationArtifactIDs.remove(artifactId)
             self.parent.sceneManager.loadVisibleAnnotationOwnerUIDs[artifactId] = nil
@@ -306,6 +388,7 @@ extension ARViewContainer {
 
             if self.parent.sceneManager.drawingManager.removeStroke(artifactId: artifactId, in: arView.scene) {
                 // Removal handled above; nothing else needed here.
+                self.parent.syncDrawingOwnerBadges(on: arView)
             }
 
             self.parent.removeArtifactOwnerBadge(artifactId: artifactId)
@@ -344,6 +427,10 @@ extension ARViewContainer {
             // 1) Tap hits an existing annotation → enter edit mode
             for (id, tv) in parent.sceneManager.annotationViews {
                 if tv.frame.contains(location) {
+                    guard parent.canEditAnnotation(id) else {
+                        parent.hideQuickDeleteButton()
+                        return
+                    }
                     if let activeId = parent.sceneManager.activeAnnotationEditingId, activeId != id {
                         _ = finishActiveAnnotationEditingIfNeeded(on: arView)
                     }
@@ -398,7 +485,14 @@ extension ARViewContainer {
                 ?? parent.sceneManager.isEditing.first(where: { $0.value })?.key else {
                 return false
             }
+            guard parent.canEditAnnotation(editingId) else {
+                parent.sceneManager.isEditing[editingId] = false
+                parent.sceneManager.clearActiveAnnotationEditingState()
+                parent.hideQuickDeleteButton()
+                return false
+            }
 
+            parent.hideQuickDeleteButton()
             parent.sceneManager.isEditing[editingId] = false
             if let tv = parent.sceneManager.annotationViews[editingId] {
                 tv.isEditable = false

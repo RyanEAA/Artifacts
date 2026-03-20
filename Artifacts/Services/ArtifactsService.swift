@@ -21,6 +21,8 @@ struct ArtifactMapItem: Identifiable, Equatable {
     let sceneId: String
     let coordinate: CLLocationCoordinate2D
     let createdAt: Date
+    let memberArtifactIds: [String]
+    let drawingArtworkId: String?
 
     static func == (lhs: ArtifactMapItem, rhs: ArtifactMapItem) -> Bool {
         lhs.id == rhs.id
@@ -29,6 +31,7 @@ struct ArtifactMapItem: Identifiable, Equatable {
 
 struct DrawingArtifactRecord {
     let artifactId: String
+    let artworkId: String
     let ownerUid: String
     let points: [SIMD3<Float>]
     let colorRGBA: SIMD4<Float>
@@ -111,7 +114,7 @@ final class ArtifactsService {
                     }
                     .sorted { $0.createdAt > $1.createdAt }
 
-                completion(items)
+                completion(Self.collapsingDrawingArtifacts(items))
             }
     }
 
@@ -621,6 +624,7 @@ final class ArtifactsService {
 
     func createDrawingArtifact(
         artifactId: String,
+        artworkId: String,
         sceneId: String,
         points: [SIMD3<Float>],
         colorRGBA: SIMD4<Float>,
@@ -650,6 +654,7 @@ final class ArtifactsService {
 
         var doc: [String: Any] = [
             "id": artifactId,
+            "drawingArtworkId": artworkId,
             "ownerUid": uid,
             "sceneId": sceneId,
             "type": "drawing",
@@ -706,6 +711,7 @@ final class ArtifactsService {
 
             return DrawingArtifactRecord(
                 artifactId: doc.documentID,
+                artworkId: data["drawingArtworkId"] as? String ?? doc.documentID,
                 ownerUid: data["ownerUid"] as? String ?? uid,
                 points: points,
                 colorRGBA: color,
@@ -717,22 +723,31 @@ final class ArtifactsService {
     }
 
     func fetchVisibleDrawingArtifacts(sceneId: String) async throws -> [DrawingArtifactRecord] {
-        guard let me = Auth.auth().currentUser?.uid else {
+        guard Auth.auth().currentUser?.uid != nil else {
             throw NSError(domain: "ArtifactsService", code: 401, userInfo: [
                 NSLocalizedDescriptionKey: "User is not authenticated"
             ])
         }
         guard !sceneId.isEmpty else { return [] }
 
-        let ownerUid = try await sceneOwnerUid(for: sceneId) ?? me
-        let snap = try await db.collection("artifacts")
-            .whereField("ownerUid", isEqualTo: ownerUid)
-            .whereField("sceneId", isEqualTo: sceneId)
-            .whereField("type", isEqualTo: "drawing")
-            .getDocuments()
+        let sceneIds = try await visibleSceneIds(for: sceneId)
+        let snap: QuerySnapshot
+        if sceneIds.count > 1 {
+            snap = try await db.collection("artifacts")
+                .whereField("sceneId", in: sceneIds)
+                .whereField("type", isEqualTo: "drawing")
+                .getDocuments()
+        } else {
+            snap = try await db.collection("artifacts")
+                .whereField("sceneId", isEqualTo: sceneIds.first ?? sceneId)
+                .whereField("type", isEqualTo: "drawing")
+                .getDocuments()
+        }
 
         let records: [DrawingArtifactRecord] = snap.documents.compactMap { doc in
             let data = doc.data()
+            let published = data["published"] as? Bool
+            guard published != false else { return nil }
             let pointMaps = data["drawingPoints"] as? [[String: Double]] ?? []
             let points: [SIMD3<Float>] = pointMaps.compactMap { p in
                 guard let x = p["x"], let y = p["y"], let z = p["z"] else { return nil }
@@ -751,7 +766,8 @@ final class ArtifactsService {
 
             return DrawingArtifactRecord(
                 artifactId: doc.documentID,
-                ownerUid: data["ownerUid"] as? String ?? ownerUid,
+                artworkId: data["drawingArtworkId"] as? String ?? doc.documentID,
+                ownerUid: data["ownerUid"] as? String ?? "",
                 points: points,
                 colorRGBA: color,
                 brushSize: brush
@@ -762,42 +778,54 @@ final class ArtifactsService {
     }
 
     func fetchVisibleDrawingArtifactCount(sceneId: String) async throws -> Int {
-        guard let me = Auth.auth().currentUser?.uid else {
-            throw NSError(domain: "ArtifactsService", code: 401, userInfo: [
-                NSLocalizedDescriptionKey: "User is not authenticated"
-            ])
-        }
-        guard !sceneId.isEmpty else { return 0 }
+        let records = try await fetchVisibleDrawingArtifacts(sceneId: sceneId)
+        return clusteredDrawingArtifacts(records).count
+    }
 
-        let ownerUid = try await sceneOwnerUid(for: sceneId) ?? me
-        let snap = try await db.collection("artifacts")
-            .whereField("ownerUid", isEqualTo: ownerUid)
-            .whereField("sceneId", isEqualTo: sceneId)
-            .whereField("type", isEqualTo: "drawing")
-            .getDocuments()
+    func clusteredDrawingArtifacts(_ records: [DrawingArtifactRecord]) -> [[DrawingArtifactRecord]] {
+        guard !records.isEmpty else { return [] }
 
-        return snap.documents.reduce(into: 0) { count, doc in
-            let published = doc.data()["published"] as? Bool
-            if published != false {
-                count += 1
+        var clusters: [[DrawingArtifactRecord]] = []
+
+        for record in records {
+            if let index = clusters.firstIndex(where: { cluster in
+                guard let seed = cluster.first else { return false }
+                guard seed.ownerUid == record.ownerUid else { return false }
+                if !seed.artworkId.isEmpty, !record.artworkId.isEmpty {
+                    return seed.artworkId == record.artworkId
+                }
+                return Self.drawingRecordsBelongTogether(seed, record)
+            }) {
+                clusters[index].append(record)
+            } else {
+                clusters.append([record])
             }
         }
+
+        return clusters
     }
 
     func fetchVisibleModelArtifacts(sceneId: String) async throws -> [ModelArtifactRecord] {
-        guard let me = Auth.auth().currentUser?.uid else {
+        guard Auth.auth().currentUser?.uid != nil else {
             throw NSError(domain: "ArtifactsService", code: 401, userInfo: [
                 NSLocalizedDescriptionKey: "User is not authenticated"
             ])
         }
         guard !sceneId.isEmpty else { return [] }
 
-        let ownerUid = try await sceneOwnerUid(for: sceneId) ?? me
-        let snap = try await db.collection("artifacts")
-            .whereField("ownerUid", isEqualTo: ownerUid)
-            .whereField("sceneId", isEqualTo: sceneId)
-            .whereField("type", isEqualTo: "model")
-            .getDocuments()
+        let sceneIds = try await visibleSceneIds(for: sceneId)
+        let snap: QuerySnapshot
+        if sceneIds.count > 1 {
+            snap = try await db.collection("artifacts")
+                .whereField("sceneId", in: sceneIds)
+                .whereField("type", isEqualTo: "model")
+                .getDocuments()
+        } else {
+            snap = try await db.collection("artifacts")
+                .whereField("sceneId", isEqualTo: sceneIds.first ?? sceneId)
+                .whereField("type", isEqualTo: "model")
+                .getDocuments()
+        }
 
         return snap.documents.compactMap { doc in
             let data = doc.data()
@@ -807,7 +835,7 @@ final class ArtifactsService {
             guard let transform = Self.transformMatrix(from: data["transform"]) else { return nil }
             return ModelArtifactRecord(
                 artifactId: doc.documentID,
-                ownerUid: data["ownerUid"] as? String ?? ownerUid,
+                ownerUid: data["ownerUid"] as? String ?? "",
                 modelName: modelName,
                 transform: transform
             )
@@ -815,19 +843,26 @@ final class ArtifactsService {
     }
 
     func fetchVisibleAnnotationArtifacts(sceneId: String) async throws -> [AnnotationArtifactRecord] {
-        guard let me = Auth.auth().currentUser?.uid else {
+        guard Auth.auth().currentUser?.uid != nil else {
             throw NSError(domain: "ArtifactsService", code: 401, userInfo: [
                 NSLocalizedDescriptionKey: "User is not authenticated"
             ])
         }
         guard !sceneId.isEmpty else { return [] }
 
-        let ownerUid = try await sceneOwnerUid(for: sceneId) ?? me
-        let snap = try await db.collection("artifacts")
-            .whereField("ownerUid", isEqualTo: ownerUid)
-            .whereField("sceneId", isEqualTo: sceneId)
-            .whereField("type", isEqualTo: "annotation")
-            .getDocuments()
+        let sceneIds = try await visibleSceneIds(for: sceneId)
+        let snap: QuerySnapshot
+        if sceneIds.count > 1 {
+            snap = try await db.collection("artifacts")
+                .whereField("sceneId", in: sceneIds)
+                .whereField("type", isEqualTo: "annotation")
+                .getDocuments()
+        } else {
+            snap = try await db.collection("artifacts")
+                .whereField("sceneId", isEqualTo: sceneIds.first ?? sceneId)
+                .whereField("type", isEqualTo: "annotation")
+                .getDocuments()
+        }
 
         return snap.documents.compactMap { doc in
             let data = doc.data()
@@ -838,7 +873,7 @@ final class ArtifactsService {
             guard let transform = Self.transformMatrix(from: data["transform"]) else { return nil }
             return AnnotationArtifactRecord(
                 artifactId: doc.documentID,
-                ownerUid: data["ownerUid"] as? String ?? ownerUid,
+                ownerUid: data["ownerUid"] as? String ?? "",
                 annotationText: text,
                 annotationColorHex: colorHex,
                 transform: transform
@@ -896,7 +931,9 @@ final class ArtifactsService {
                 ownerUid: ownerUid,
                 sceneId: sceneId,
                 coordinate: CLLocationCoordinate2D(latitude: gp.latitude, longitude: gp.longitude),
-                createdAt: createdAt
+                createdAt: createdAt,
+                memberArtifactIds: [docId],
+                drawingArtworkId: data["drawingArtworkId"] as? String
             )
         }
 
@@ -908,7 +945,9 @@ final class ArtifactsService {
                 ownerUid: ownerUid,
                 sceneId: sceneId,
                 coordinate: CLLocationCoordinate2D(latitude: gp.latitude, longitude: gp.longitude),
-                createdAt: createdAt
+                createdAt: createdAt,
+                memberArtifactIds: [docId],
+                drawingArtworkId: data["drawingArtworkId"] as? String
             )
         }
 
@@ -921,7 +960,9 @@ final class ArtifactsService {
                 ownerUid: ownerUid,
                 sceneId: sceneId,
                 coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
-                createdAt: createdAt
+                createdAt: createdAt,
+                memberArtifactIds: [docId],
+                drawingArtworkId: data["drawingArtworkId"] as? String
             )
         }
 
@@ -934,7 +975,9 @@ final class ArtifactsService {
                 ownerUid: ownerUid,
                 sceneId: sceneId,
                 coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
-                createdAt: createdAt
+                createdAt: createdAt,
+                memberArtifactIds: [docId],
+                drawingArtworkId: data["drawingArtworkId"] as? String
             )
         }
 
@@ -987,6 +1030,47 @@ final class ArtifactsService {
         return String(compact.prefix(28)) + "..."
     }
 
+    private static func drawingBounds(
+        for record: DrawingArtifactRecord
+    ) -> (minX: Float, maxX: Float, minY: Float, maxY: Float, averageZ: Float)? {
+        guard let firstPoint = record.points.first else { return nil }
+
+        var minX = firstPoint.x
+        var maxX = firstPoint.x
+        var minY = firstPoint.y
+        var maxY = firstPoint.y
+        var zTotal: Float = 0
+
+        for point in record.points {
+            minX = min(minX, point.x)
+            maxX = max(maxX, point.x)
+            minY = min(minY, point.y)
+            maxY = max(maxY, point.y)
+            zTotal += point.z
+        }
+
+        return (minX, maxX, minY, maxY, zTotal / Float(record.points.count))
+    }
+
+    private static func drawingRecordsBelongTogether(
+        _ lhs: DrawingArtifactRecord,
+        _ rhs: DrawingArtifactRecord
+    ) -> Bool {
+        guard let lhsBounds = drawingBounds(for: lhs),
+              let rhsBounds = drawingBounds(for: rhs) else {
+            return false
+        }
+
+        let overlapTolerance: Float = 0.05
+        let depthTolerance: Float = 0.08
+        let overlapsX = lhsBounds.minX - overlapTolerance <= rhsBounds.maxX
+            && rhsBounds.minX - overlapTolerance <= lhsBounds.maxX
+        let overlapsY = lhsBounds.minY - overlapTolerance <= rhsBounds.maxY
+            && rhsBounds.minY - overlapTolerance <= lhsBounds.maxY
+        let depthDelta = abs(lhsBounds.averageZ - rhsBounds.averageZ)
+        return overlapsX && overlapsY && depthDelta <= depthTolerance
+    }
+
     private static func mergeAndSort(_ byChunk: [[String: ArtifactMapItem]]) -> [ArtifactMapItem] {
         var merged: [String: ArtifactMapItem] = [:]
         for chunk in byChunk {
@@ -1000,7 +1084,56 @@ final class ArtifactsService {
                 }
             }
         }
-        return merged.values.sorted { $0.createdAt > $1.createdAt }
+        return collapsingDrawingArtifacts(merged.values.sorted { $0.createdAt > $1.createdAt })
+    }
+
+    private static func collapsingDrawingArtifacts(_ items: [ArtifactMapItem]) -> [ArtifactMapItem] {
+        let drawings = items.filter { $0.type == "drawing" }
+        let nonDrawings = items.filter { $0.type != "drawing" }
+        guard !drawings.isEmpty else { return items }
+
+        var clusters: [[ArtifactMapItem]] = []
+
+        for item in drawings.sorted(by: { $0.createdAt > $1.createdAt }) {
+            if let index = clusters.firstIndex(where: { cluster in
+                guard let seed = cluster.first else { return false }
+                guard seed.ownerUid == item.ownerUid, seed.sceneId == item.sceneId else { return false }
+                if let seedArtworkId = seed.drawingArtworkId, let itemArtworkId = item.drawingArtworkId {
+                    return seedArtworkId == itemArtworkId
+                }
+                let distance = CLLocation(latitude: seed.coordinate.latitude, longitude: seed.coordinate.longitude)
+                    .distance(from: CLLocation(latitude: item.coordinate.latitude, longitude: item.coordinate.longitude))
+                let timeDelta = abs(seed.createdAt.timeIntervalSince(item.createdAt))
+                return distance <= 3.0 && timeDelta <= 180
+            }) {
+                clusters[index].append(item)
+            } else {
+                clusters.append([item])
+            }
+        }
+
+        let collapsed = clusters.compactMap { cluster -> ArtifactMapItem? in
+            guard let newest = cluster.max(by: { $0.createdAt < $1.createdAt }) else { return nil }
+            guard cluster.count > 1 else { return newest }
+
+            let memberIds = cluster.flatMap(\.memberArtifactIds).sorted()
+            let averageLatitude = cluster.reduce(0.0) { $0 + $1.coordinate.latitude } / Double(cluster.count)
+            let averageLongitude = cluster.reduce(0.0) { $0 + $1.coordinate.longitude } / Double(cluster.count)
+
+            return ArtifactMapItem(
+                id: "drawing-profile:" + memberIds.joined(separator: "|"),
+                title: newest.title,
+                type: newest.type,
+                ownerUid: newest.ownerUid,
+                sceneId: newest.sceneId,
+                coordinate: CLLocationCoordinate2D(latitude: averageLatitude, longitude: averageLongitude),
+                createdAt: newest.createdAt,
+                memberArtifactIds: memberIds,
+                drawingArtworkId: newest.drawingArtworkId
+            )
+        }
+
+        return (nonDrawings + collapsed).sorted { $0.createdAt > $1.createdAt }
     }
 
     private static func chunked<T>(_ items: [T], size: Int) -> [[T]] {
@@ -1029,6 +1162,14 @@ final class ArtifactsService {
         guard !sceneId.isEmpty else { return nil }
         let doc = try await db.collection("scenes").document(sceneId).getDocument()
         return doc.data()?["ownerUid"] as? String
+    }
+
+    private func visibleSceneIds(for sceneId: String) async throws -> [String] {
+        guard !sceneId.isEmpty else { return [] }
+        let doc = try await db.collection("scenes").document(sceneId).getDocument()
+        let inherited = doc.data()?["visibleSceneIds"] as? [String] ?? []
+        let merged = Array(Set(inherited + [sceneId])).filter { !$0.isEmpty }
+        return Array(merged.prefix(10))
     }
 
     func fetchUsername(for uid: String) async throws -> String? {

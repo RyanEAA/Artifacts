@@ -118,6 +118,9 @@ struct ARViewContainer: UIViewRepresentable {
         let isDrawing: Bool
         if case .draw = placementSettings.selectedTool { isDrawing = true } else { isDrawing = false }
         context.coordinator.drawPanGesture?.isEnabled = isDrawing
+        if !isDrawing {
+            sceneManager.drawingManager.finishCurrentArtwork()
+        }
 
         // Disable tap recognizer while drawing so finger-drag doesn't fire it
         uiView.gestureRecognizers?

@@ -11,6 +11,8 @@ import FirebaseAuth
 
 extension ARViewContainer {
 
+    private var drawingBadgePrefix: String { "drawing-badge:" }
+
     struct AnnotationData: Codable {
         let id: UUID
         var text: String
@@ -19,6 +21,16 @@ extension ARViewContainer {
 }
 
 extension ARViewContainer {
+
+    func canEditAnnotation(_ annotationId: UUID) -> Bool {
+        let artifactId = annotationId.uuidString
+        let ownerUid = self.sceneManager.artifactOwnerBadgeOwnerUids[artifactId]
+            ?? self.sceneManager.loadVisibleAnnotationOwnerUIDs[artifactId]
+        guard let ownerUid, !ownerUid.isEmpty else {
+            return true
+        }
+        return ownerUid == Auth.auth().currentUser?.uid
+    }
 
     func annotationColorHex(from color: UIColor) -> String {
         var r: CGFloat = 0
@@ -113,6 +125,7 @@ extension ARViewContainer {
         self.sceneManager.artifactOwnerBadgeWorldPositions[artifactId] = nil
         self.sceneManager.artifactOwnerBadgeOffsetsY[artifactId] = nil
         self.sceneManager.artifactOwnerBadgeOwnerUids[artifactId] = nil
+        self.sceneManager.drawingBadgeMembersById[artifactId] = nil
         if self.sceneManager.selectedArtifactForQuickDelete == artifactId {
             self.hideQuickDeleteButton()
         }
@@ -189,45 +202,144 @@ extension ARViewContainer {
         artifactId: String,
         verticalPadding: Float = 0.02
     ) -> SIMD3<Float>? {
-        guard let stroke = self.sceneManager.drawingManager.strokeGroups.first(where: { $0.artifactId == artifactId }),
-              !stroke.points.isEmpty else { return nil }
-
-        var minX = stroke.points[0].x
-        var maxX = stroke.points[0].x
-        var maxY = stroke.points[0].y
-        var averageZ: Float = 0
-
-        for point in stroke.points {
-            minX = min(minX, point.x)
-            maxX = max(maxX, point.x)
-            maxY = max(maxY, point.y)
-            averageZ += point.z
-        }
-
-        averageZ /= Float(stroke.points.count)
+        guard let bounds = drawingBoundsWorldPosition(for: artifactId) else { return nil }
+        let minX = bounds.minX
+        let maxX = bounds.maxX
+        let maxY = bounds.maxY
+        let averageZ = bounds.averageZ
         return SIMD3<Float>((minX + maxX) * 0.5, maxY + verticalPadding, averageZ)
     }
 
     private func drawingCenterWorldPosition(artifactId: String) -> SIMD3<Float>? {
-        guard let stroke = self.sceneManager.drawingManager.strokeGroups.first(where: { $0.artifactId == artifactId }),
-              !stroke.points.isEmpty else { return nil }
+        guard let bounds = drawingBoundsWorldPosition(for: artifactId) else { return nil }
+        let minX = bounds.minX
+        let maxX = bounds.maxX
+        let minY = bounds.minY
+        let maxY = bounds.maxY
+        let averageZ = bounds.averageZ
+        return SIMD3<Float>((minX + maxX) * 0.5, (minY + maxY) * 0.5, averageZ)
+    }
 
-        var minX = stroke.points[0].x
-        var maxX = stroke.points[0].x
-        var minY = stroke.points[0].y
-        var maxY = stroke.points[0].y
-        var averageZ: Float = 0
+    private func drawingMemberArtifactIds(for artifactId: String) -> [String] {
+        if let members = self.sceneManager.drawingBadgeMembersById[artifactId], !members.isEmpty {
+            return members
+        }
+        return [artifactId]
+    }
 
-        for point in stroke.points {
-            minX = min(minX, point.x)
-            maxX = max(maxX, point.x)
-            minY = min(minY, point.y)
-            maxY = max(maxY, point.y)
-            averageZ += point.z
+    private func drawingBoundsWorldPosition(
+        for artifactId: String
+    ) -> (minX: Float, maxX: Float, minY: Float, maxY: Float, averageZ: Float)? {
+        let memberIds = drawingMemberArtifactIds(for: artifactId)
+        let strokes = memberIds.compactMap { id in
+            self.sceneManager.drawingManager.strokeGroups.first(where: { $0.artifactId == id })
+        }
+        guard let firstStroke = strokes.first, let firstPoint = firstStroke.points.first else { return nil }
+
+        var minX = firstPoint.x
+        var maxX = firstPoint.x
+        var minY = firstPoint.y
+        var maxY = firstPoint.y
+        var zTotal: Float = 0
+        var zCount: Float = 0
+
+        for stroke in strokes {
+            for point in stroke.points {
+                minX = min(minX, point.x)
+                maxX = max(maxX, point.x)
+                minY = min(minY, point.y)
+                maxY = max(maxY, point.y)
+                zTotal += point.z
+                zCount += 1
+            }
         }
 
-        averageZ /= Float(stroke.points.count)
-        return SIMD3<Float>((minX + maxX) * 0.5, (minY + maxY) * 0.5, averageZ)
+        guard zCount > 0 else { return nil }
+        return (minX, maxX, minY, maxY, zTotal / zCount)
+    }
+
+    private func drawingBadgeIdentifier(memberIds: [String]) -> String {
+        drawingBadgePrefix + memberIds.sorted().joined(separator: "|")
+    }
+
+    private func strokesShouldShareBadge(
+        _ lhs: DrawingManager.StrokeRecord,
+        _ rhs: DrawingManager.StrokeRecord
+    ) -> Bool {
+        guard let lhsBounds = drawingBoundsWorldPosition(for: lhs.artifactId),
+              let rhsBounds = drawingBoundsWorldPosition(for: rhs.artifactId) else {
+            return false
+        }
+
+        let tolerance: Float = 0.05
+        let overlapsX = lhsBounds.minX - tolerance <= rhsBounds.maxX && rhsBounds.minX - tolerance <= lhsBounds.maxX
+        let overlapsY = lhsBounds.minY - tolerance <= rhsBounds.maxY && rhsBounds.minY - tolerance <= lhsBounds.maxY
+        let zDistance = abs(lhsBounds.averageZ - rhsBounds.averageZ)
+        return overlapsX && overlapsY && zDistance <= 0.08
+    }
+
+    func syncDrawingOwnerBadges(on arView: ARView) {
+        let existingDrawingBadgeIds = Array(self.sceneManager.artifactOwnerBadgeViews.keys).filter {
+            $0.hasPrefix(drawingBadgePrefix)
+        }
+        existingDrawingBadgeIds.forEach { self.removeArtifactOwnerBadge(artifactId: $0) }
+
+        for stroke in self.sceneManager.drawingManager.strokeGroups {
+            self.sceneManager.artifactOwnerBadgeViews[stroke.artifactId]?.removeFromSuperview()
+            self.sceneManager.artifactOwnerBadgeViews[stroke.artifactId] = nil
+            self.sceneManager.artifactOwnerBadgeWorldPositions[stroke.artifactId] = nil
+            self.sceneManager.artifactOwnerBadgeOffsetsY[stroke.artifactId] = nil
+        }
+
+        self.sceneManager.drawingBadgeMembersById = [:]
+
+        let strokes = self.sceneManager.drawingManager.strokeGroups
+        var visited = Set<String>()
+
+        for stroke in strokes {
+            if visited.contains(stroke.artifactId) { continue }
+            let ownerUid = self.sceneManager.artifactOwnerBadgeOwnerUids[stroke.artifactId]
+                ?? Auth.auth().currentUser?.uid
+                ?? ""
+            var cluster: [DrawingManager.StrokeRecord] = [stroke]
+            visited.insert(stroke.artifactId)
+
+            var index = 0
+            while index < cluster.count {
+                let current = cluster[index]
+                for candidate in strokes {
+                    guard !visited.contains(candidate.artifactId) else { continue }
+                    let candidateOwnerUid = self.sceneManager.artifactOwnerBadgeOwnerUids[candidate.artifactId]
+                        ?? ownerUid
+                    guard candidateOwnerUid == ownerUid else { continue }
+                    if !current.artworkId.isEmpty, !candidate.artworkId.isEmpty {
+                        if current.artworkId == candidate.artworkId {
+                            cluster.append(candidate)
+                            visited.insert(candidate.artifactId)
+                        }
+                        continue
+                    }
+                    if strokesShouldShareBadge(current, candidate) {
+                        cluster.append(candidate)
+                        visited.insert(candidate.artifactId)
+                    }
+                }
+                index += 1
+            }
+
+            let memberIds = cluster.map(\.artifactId)
+            let badgeId = drawingBadgeIdentifier(memberIds: memberIds)
+            self.sceneManager.drawingBadgeMembersById[badgeId] = memberIds
+            if let worldPosition = drawingOverlayWorldPosition(artifactId: badgeId) {
+                self.upsertArtifactOwnerBadge(
+                    artifactId: badgeId,
+                    ownerUid: ownerUid,
+                    worldPosition: worldPosition,
+                    yOffset: -14,
+                    on: arView
+                )
+            }
+        }
     }
 
     private func quickDeleteButtonCenterForModel(artifactId: String, on arView: ARView) -> CGPoint? {
@@ -443,6 +555,7 @@ extension ARViewContainer {
     }
 
     func updateAnnotationTextInFirestore(annotationId: UUID, text: String) {
+        guard canEditAnnotation(annotationId) else { return }
         let artifactId = annotationId.uuidString
         Task {
             do {
@@ -457,6 +570,7 @@ extension ARViewContainer {
     }
 
     func updateAnnotationColorInFirestore(annotationId: UUID, colorHex: String?) {
+        guard canEditAnnotation(annotationId) else { return }
         let artifactId = annotationId.uuidString
         Task {
             do {
@@ -666,6 +780,7 @@ extension ARViewContainer {
         )
         let name = annotationNamePrefix + encodeAnnotation(payload)
         let anchor = ARAnchor(name: name, transform: transform)
+        self.sceneManager.locallyPlacedAnnotationIDs.insert(id)
         arView.session.add(anchor: anchor)
         let ownerUid = Auth.auth().currentUser?.uid ?? ""
         let pos = SIMD3<Float>(
@@ -714,6 +829,7 @@ extension ARViewContainer {
         )
         let name = annotationNamePrefix + encodeAnnotation(payload)
         let anchor = ARAnchor(name: name, transform: transform)
+        self.sceneManager.locallyPlacedAnnotationIDs.insert(id)
         arView.session.add(anchor: anchor)
         let ownerUid = Auth.auth().currentUser?.uid ?? ""
         let pos = SIMD3<Float>(
