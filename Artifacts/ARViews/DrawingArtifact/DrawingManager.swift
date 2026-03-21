@@ -31,6 +31,8 @@ class DrawingManager: ObservableObject {
     @Published var brushColor: UIColor = .white
     @Published var brushSize: Float   = 0.004   // stroke radius in metres
     @Published var drawMode: DrawMode = .air
+    var currentStrokeBatchPoints: [SIMD3<Float>] = []
+    var batchSize = 24
 
     // MARK: Stroke tracking
 
@@ -271,4 +273,41 @@ class DrawingManager: ObservableObject {
         let a = Float(c.indices.contains(3) ? c[3] : CGFloat(1))
         return SIMD4<Float>(r, g, b, a)
     }
+    
+    func buildStrokeMesh(points: [SIMD3<Float>], radius: Float) -> MeshResource {
+        var vertices: [SIMD3<Float>] = []
+        var indices: [UInt32] = []
+
+        var index: UInt32 = 0
+
+        for i in 1..<points.count {
+            let p0 = points[i - 1]
+            let p1 = points[i]
+
+            let dir = simd_normalize(p1 - p0)
+            let right = simd_normalize(simd_cross(dir, SIMD3<Float>(0,1,0))) * radius
+
+            let v0 = p0 + right
+            let v1 = p0 - right
+            let v2 = p1 + right
+            let v3 = p1 - right
+
+            vertices.append(contentsOf: [v0, v1, v2, v3])
+
+            indices.append(contentsOf: [
+                index, index+1, index+2,
+                index+2, index+1, index+3
+            ])
+
+            index += 4
+        }
+
+        var meshDesc = MeshDescriptor()
+        meshDesc.positions = MeshBuffer(vertices)
+        meshDesc.primitives = .triangles(indices)
+
+        return try! MeshResource.generate(from: [meshDesc])
+    }
+    
+
 }

@@ -99,7 +99,6 @@ extension ARViewContainer {
         segment.position = (start + end) * 0.5
         segment.orientation = simd_quatf(from: SIMD3<Float>(0, 1, 0), to: simd_normalize(delta))
         segment.scale = SIMD3<Float>(radius, stretchedLength, radius)
-        segment.generateCollisionShapes(recursive: false)
 
         if sceneManager.drawAnchorEntity == nil {
             let anchor = AnchorEntity(world: .zero)
@@ -139,10 +138,9 @@ extension ARViewContainer {
         }
 
         let mesh = MeshResource.generateCylinder(height: 1.0, radius: 1.0)
-        var mat  = SimpleMaterial()
-        mat.color    = .init(tint: color, texture: nil)
-        mat.roughness = .float(0.6)
-        mat.metallic  = .float(0.0)
+        var mat = UnlitMaterial()
+        mat.color = .init(tint: color)
+
         let entity = ModelEntity(mesh: mesh, materials: [mat])
         sceneManager.drawingStrokePrototypeCache[key] = entity
         return entity
