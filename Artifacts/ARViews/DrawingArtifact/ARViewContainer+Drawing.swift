@@ -59,7 +59,7 @@ extension ARViewContainer {
 
     private func strokeSpacing(for radius: Float, motionScale: Float) -> Float {
         let clampedMotion = min(max(motionScale, 0), 1)
-        let multiplier = 0.5 + (0.5 * clampedMotion)
+        let multiplier = 0.35 + (0.35 * clampedMotion)
         return max(radius * multiplier, 0.0009)
     }
 
@@ -82,39 +82,10 @@ extension ARViewContainer {
     // MARK: Stroke geometry
 
     @discardableResult
-    func placeStrokeSegment(
-        from start: SIMD3<Float>,
-        to end: SIMD3<Float>,
-        color: UIColor,
-        radius: Float,
-        in arView: ARView
-    ) -> ModelEntity? {
-        let delta = end - start
-        let length = simd_length(delta)
-        guard length > 0.0002 else { return nil }
-        let overlap = min(radius * 1.6, length * 0.35)
-        let stretchedLength = length + overlap
-
-        let segment = makeReferenceStrokeSegment(color: color).clone(recursive: false)
-        segment.position = (start + end) * 0.5
-        segment.orientation = simd_quatf(from: SIMD3<Float>(0, 1, 0), to: simd_normalize(delta))
-        segment.scale = SIMD3<Float>(radius, stretchedLength, radius)
-
-        if sceneManager.drawAnchorEntity == nil {
-            let anchor = AnchorEntity(world: .zero)
-            arView.scene.addAnchor(anchor)
-            sceneManager.drawAnchorEntity = anchor
-        }
-        sceneManager.drawAnchorEntity!.addChild(segment)
-        return segment
-    }
-
-    @discardableResult
     func placeStrokeDot(at worldPos: SIMD3<Float>, color: UIColor, radius: Float, in arView: ARView) -> ModelEntity {
         let dot = makeReferenceStrokeDot(color: color).clone(recursive: false)
         dot.position = worldPos
         dot.scale = SIMD3<Float>(repeating: radius)
-        dot.generateCollisionShapes(recursive: false)
 
         if sceneManager.drawAnchorEntity == nil {
             let anchor = AnchorEntity(world: .zero)
@@ -123,27 +94,6 @@ extension ARViewContainer {
         }
         sceneManager.drawAnchorEntity!.addChild(dot)
         return dot
-    }
-
-    private func makeReferenceStrokeSegment(color: UIColor) -> ModelEntity {
-        let colorComponents = color.cgColor.components ?? [1, 1, 1, 1]
-        let r = colorComponents.indices.contains(0) ? colorComponents[0] : 1
-        let g = colorComponents.indices.contains(1) ? colorComponents[1] : r
-        let b = colorComponents.indices.contains(2) ? colorComponents[2] : r
-        let a = colorComponents.indices.contains(3) ? colorComponents[3] : 1
-        let key = String(format: "segment_r%.3f_g%.3f_b%.3f_a%.3f", r, g, b, a)
-
-        if let cached = sceneManager.drawingStrokePrototypeCache[key] {
-            return cached
-        }
-
-        let mesh = MeshResource.generateCylinder(height: 1.0, radius: 1.0)
-        var mat = UnlitMaterial()
-        mat.color = .init(tint: color)
-
-        let entity = ModelEntity(mesh: mesh, materials: [mat])
-        sceneManager.drawingStrokePrototypeCache[key] = entity
-        return entity
     }
 
     private func makeReferenceStrokeDot(color: UIColor) -> ModelEntity {
@@ -159,10 +109,8 @@ extension ARViewContainer {
         }
 
         let mesh = MeshResource.generateSphere(radius: 1.0)
-        var mat  = SimpleMaterial()
-        mat.color    = .init(tint: color, texture: nil)
-        mat.roughness = .float(0.6)
-        mat.metallic  = .float(0.0)
+        var mat = UnlitMaterial()
+        mat.color = .init(tint: color)
         let entity = ModelEntity(mesh: mesh, materials: [mat])
         sceneManager.drawingStrokePrototypeCache[key] = entity
         return entity
@@ -339,25 +287,6 @@ extension ARViewContainer {
                                     in: arView
                                 )
                                 entities.append(startCap)
-                                for index in 1..<pointsToRender.count {
-                                    if let segment = self.placeStrokeSegment(
-                                        from: pointsToRender[index - 1],
-                                        to: pointsToRender[index],
-                                        color: color,
-                                        radius: stroke.brushSize,
-                                        in: arView
-                                    ) {
-                                        self.sceneManager.drawAnchorEntity?.isEnabled = !self.sceneManager.isAwaitingVisibleArtifactsAfterLoad
-                                        entities.append(segment)
-                                    }
-                                }
-                                let endCap = self.placeStrokeDot(
-                                    at: pointsToRender[pointsToRender.count - 1],
-                                    color: color,
-                                    radius: stroke.brushSize,
-                                    in: arView
-                                )
-                                entities.append(endCap)
                             }
 
                             self.sceneManager.drawingManager.appendRestoredStroke(
@@ -500,28 +429,15 @@ extension ARViewContainer.Coordinator {
             let dist = prev.distance(to: currentPoint)
             guard dist > max(spacing * 0.18, 0.00035) else { return }
 
-            let filled = Array(interpolatedPositions(from: prev, to: currentPoint, spacing: spacing).dropFirst().prefix(10))
-            var segmentStart = prev
+            let filled = Array(interpolatedPositions(from: prev, to: currentPoint, spacing: spacing).dropFirst().prefix(4))
             for point in filled + [currentPoint] {
-                if dm.activeStrokeEntities.isEmpty {
-                    let startCap = parent.placeStrokeDot(
-                        at: segmentStart,
-                        color: dm.brushColor,
-                        radius: dm.brushSize,
-                        in: arView
-                    )
-                    dm.addStrokeEntity(startCap, endingAt: segmentStart)
-                }
-                if let segment = parent.placeStrokeSegment(
-                    from: segmentStart,
-                    to: point,
+                let dot = parent.placeStrokeDot(
+                    at: point,
                     color: dm.brushColor,
                     radius: dm.brushSize,
                     in: arView
-                ) {
-                    dm.addStrokeEntity(segment, endingAt: point)
-                }
-                segmentStart = point
+                )
+                dm.addStrokeEntity(dot, endingAt: point)
             }
         } else {
             dm.addStrokePoint(currentPoint)
