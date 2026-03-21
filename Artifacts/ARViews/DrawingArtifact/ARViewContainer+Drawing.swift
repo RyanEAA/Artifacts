@@ -59,7 +59,7 @@ extension ARViewContainer {
 
     private func strokeSpacing(for radius: Float, motionScale: Float) -> Float {
         let clampedMotion = min(max(motionScale, 0), 1)
-        let multiplier = 0.24 + (0.38 * clampedMotion)
+        let multiplier = 0.5 + (0.5 * clampedMotion)
         return max(radius * multiplier, 0.0009)
     }
 
@@ -500,7 +500,7 @@ extension ARViewContainer.Coordinator {
             let dist = prev.distance(to: currentPoint)
             guard dist > max(spacing * 0.18, 0.00035) else { return }
 
-            let filled = Array(interpolatedPositions(from: prev, to: currentPoint, spacing: spacing).dropFirst().prefix(80))
+            let filled = Array(interpolatedPositions(from: prev, to: currentPoint, spacing: spacing).dropFirst().prefix(10))
             var segmentStart = prev
             for point in filled + [currentPoint] {
                 if dm.activeStrokeEntities.isEmpty {
