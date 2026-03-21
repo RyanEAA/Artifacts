@@ -40,7 +40,8 @@ class DrawingManager: ObservableObject {
         let colorRGBA: SIMD4<Float>
         let brushSize: Float
         var entities: [ModelEntity]
-        var points: [SIMD3<Float>]
+        var points: [SIMD3<Float>]      // render points (trimmed, not saved)
+        var keypoints: [SIMD3<Float>]   // ARKit input points (saved to Firestore)
     }
 
     /// Completed strokes — one finger drag with points and placed entities.
@@ -51,6 +52,7 @@ class DrawingManager: ObservableObject {
     private(set) var activeStrokePoints: [SIMD3<Float>] = []
     private var activeStrokeArtifactId: String?
     private(set) var currentArtworkId: String?
+    private(set) var activeStrokeKeypoints: [SIMD3<Float>] = [] 
     private var activeStrokeColorRGBA: SIMD4<Float> = SIMD4<Float>(1, 1, 1, 1)
     private var activeStrokeBrushSize: Float = 0.004
 
@@ -60,13 +62,24 @@ class DrawingManager: ObservableObject {
     private let minSmoothingFactor: Float = 0.10
     private let maxSmoothingFactor: Float = 0.24
     private(set) var totalStrokeEntityCount: Int = 0
-    private let maxStrokeEntityCount: Int = 3200
+    private let maxStrokeEntityCount: Int = 1200
+    private let minKeypointDistance: Float = 0.005
+    private var lastKeypointPosition: SIMD3<Float>? = nil
+
+    func recordKeypointIfNeeded(_ point: SIMD3<Float>) {
+        if let last = lastKeypointPosition,
+           simd_distance(last, point) < minKeypointDistance { return }
+        activeStrokeKeypoints.append(point)
+        lastKeypointPosition = point
+    }
 
     // MARK: Stroke lifecycle
 
     func beginStroke() {
         activeStrokeEntities = []
         activeStrokePoints = []
+        activeStrokeKeypoints = []          // reset, not redeclare
+        lastKeypointPosition = nil          // reset, not redeclare
         activeStrokeArtifactId = UUID().uuidString
         if currentArtworkId == nil {
             currentArtworkId = UUID().uuidString
@@ -78,14 +91,18 @@ class DrawingManager: ObservableObject {
     }
 
     func addStrokeEntity(_ entity: ModelEntity, endingAt point: SIMD3<Float>) {
-        activeStrokeEntities.append(entity)
-        if activeStrokePoints.isEmpty {
-            trimIfNeeded()
-            activeStrokePoints.append(point)
-        } else if activeStrokePoints.last != point {
-            activeStrokePoints.append(point)
-        }
         totalStrokeEntityCount += 1
+        trimIfNeeded()
+        activeStrokeEntities.append(entity)
+        if activeStrokePoints.isEmpty || activeStrokePoints.last != point {
+            activeStrokePoints.append(point)
+            // Keep points array lean — max 600 points per active stroke
+            if activeStrokePoints.count > 600 {
+                activeStrokePoints.removeFirst()
+            }
+        }
+    }
+    func trimToLimit() {
         trimIfNeeded()
     }
 
@@ -104,7 +121,8 @@ class DrawingManager: ObservableObject {
             colorRGBA: activeStrokeColorRGBA,
             brushSize: activeStrokeBrushSize,
             entities: activeStrokeEntities,
-            points: activeStrokePoints
+            points: activeStrokePoints,
+            keypoints: activeStrokeKeypoints    // add this
         )
         strokeGroups.append(record)
         activeStrokeEntities = []
@@ -205,7 +223,8 @@ class DrawingManager: ObservableObject {
                 colorRGBA: colorRGBA,
                 brushSize: brushSize,
                 entities: entities,
-                points: points
+                points: activeStrokePoints,
+                keypoints: activeStrokeKeypoints
             )
         )
         totalStrokeEntityCount += entities.count

@@ -210,7 +210,7 @@ extension ARViewContainer {
                     artifactId: stroke.artifactId,
                     artworkId: stroke.artworkId,
                     sceneId: sceneId,
-                    points: stroke.points,
+                    points: stroke.keypoints,
                     colorRGBA: stroke.colorRGBA,
                     brushSize: stroke.brushSize,
                     coordinate: coordinate
@@ -254,15 +254,42 @@ extension ARViewContainer {
                 let strokeClusters = ArtifactsService.shared.clusteredDrawingArtifacts(strokes)
                 await MainActor.run {
                     if let loadToken, self.sceneManager.visibleArtifactLoadToken != loadToken { return }
-                    for cluster in strokeClusters {
+
+                    let allStrokes = strokeClusters.flatMap { $0 }
+                    var index = 0
+
+                    func restoreNext() {
+                        guard index < allStrokes.count else { return }
+                        if let loadToken, self.sceneManager.visibleArtifactLoadToken != loadToken { return }
+
+                        let batch = allStrokes[index..<min(index + 5, allStrokes.count)]
+                        index += 5
+
                         var clusterRestored = false
-                        for stroke in cluster {
+                        for stroke in batch {
                             guard !stroke.points.isEmpty else { continue }
-                            let step = max(1, stroke.points.count / 320)
-                            let sampled = stride(from: 0, to: stroke.points.count, by: step)
-                                .map { stroke.points[$0] }
-                            let pointsToRender = sampled
-                            guard !pointsToRender.isEmpty else { continue }
+
+                            // stroke.points are now keypoints from Firestore —
+                            // re-interpolate them to reconstruct the visual stroke
+                            let keypoints = stroke.points
+                            let spacing = max(stroke.brushSize * 0.35, 0.0009)
+                            var renderPoints: [SIMD3<Float>] = []
+
+                            if keypoints.count == 1 {
+                                renderPoints = keypoints
+                            } else {
+                                for i in 1..<keypoints.count {
+                                    let interp = interpolatedPositions(
+                                        from: keypoints[i - 1],
+                                        to: keypoints[i],
+                                        spacing: spacing
+                                    )
+                                    renderPoints.append(contentsOf: interp)
+                                }
+                                renderPoints.append(keypoints.last!)
+                            }
+
+                            guard !renderPoints.isEmpty else { continue }
 
                             let color = UIColor(
                                 red: CGFloat(stroke.colorRGBA.x),
@@ -270,23 +297,17 @@ extension ARViewContainer {
                                 blue: CGFloat(stroke.colorRGBA.z),
                                 alpha: CGFloat(stroke.colorRGBA.w)
                             )
+
+                            // Place dots up to the entity cap
                             var entities: [ModelEntity] = []
-                            if pointsToRender.count == 1 {
+                            for point in renderPoints.prefix(1200) {
                                 let dot = self.placeStrokeDot(
-                                    at: pointsToRender[0],
+                                    at: point,
                                     color: color,
                                     radius: stroke.brushSize,
                                     in: arView
                                 )
                                 entities.append(dot)
-                            } else {
-                                let startCap = self.placeStrokeDot(
-                                    at: pointsToRender[0],
-                                    color: color,
-                                    radius: stroke.brushSize,
-                                    in: arView
-                                )
-                                entities.append(startCap)
                             }
 
                             self.sceneManager.drawingManager.appendRestoredStroke(
@@ -295,15 +316,17 @@ extension ARViewContainer {
                                 colorRGBA: stroke.colorRGBA,
                                 brushSize: stroke.brushSize,
                                 entities: entities,
-                                points: pointsToRender
+                                points: renderPoints
                             )
-                            if let first = pointsToRender.first {
+
+                            if let first = keypoints.first {
                                 self.sceneManager.artifactOwnerBadgeOwnerUids[stroke.artifactId] = stroke.ownerUid
                                 self.sceneManager.artifactOwnerBadgeWorldPositions[stroke.artifactId] = first
                                 self.sceneManager.artifactOwnerBadgeOffsetsY[stroke.artifactId] = -14
                             }
                             clusterRestored = true
                         }
+
                         if clusterRestored {
                             let drawingOnlyLoad = self.sceneManager.isAwaitingOnlyDrawingsAfterLoad()
                             if drawingOnlyLoad {
@@ -318,7 +341,15 @@ extension ARViewContainer {
                                 self.sceneManager.markRestoredDrawingIfAwaiting()
                             }
                         }
+
+                        if index < allStrokes.count {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                restoreNext()
+                            }
+                        }
                     }
+
+                    restoreNext()
                 }
             } catch {
                 print("⚠️ fetchVisibleDrawingArtifacts error:", error.localizedDescription)
@@ -423,20 +454,20 @@ extension ARViewContainer.Coordinator {
         let motionScale = min(max(rawDistance / motionNormalizer, 0), 1)
         let responsiveness = 0.10 + (0.14 * motionScale)
         let currentPoint = dm.smoothPoint(rawPoint, responsiveness: responsiveness)
+
+        // Record as keypoint BEFORE interpolation
+        dm.recordKeypointIfNeeded(currentPoint)
         let spacing = parent.strokeSpacing(for: dm.brushSize, motionScale: motionScale)
 
         if let prev = dm.previousPoint {
             let dist = prev.distance(to: currentPoint)
             guard dist > max(spacing * 0.18, 0.00035) else { return }
 
+            dm.trimToLimit() // single trim pass before burst placement
+
             let filled = Array(interpolatedPositions(from: prev, to: currentPoint, spacing: spacing).dropFirst().prefix(4))
             for point in filled + [currentPoint] {
-                let dot = parent.placeStrokeDot(
-                    at: point,
-                    color: dm.brushColor,
-                    radius: dm.brushSize,
-                    in: arView
-                )
+                let dot = parent.placeStrokeDot(at: point, color: dm.brushColor, radius: dm.brushSize, in: arView)
                 dm.addStrokeEntity(dot, endingAt: point)
             }
         } else {
