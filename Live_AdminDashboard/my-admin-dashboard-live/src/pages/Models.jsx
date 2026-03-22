@@ -29,6 +29,7 @@ export default function Models() {
   const [file, setFile] = useState(null);
   const [progress, setProgress] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const [thumbnail, setThumbnail] = useState(null);
 
   if (loading) {
     return (
@@ -82,6 +83,47 @@ export default function Models() {
       );
     });
 
+    const convertImageToJPG = (file, modelName) => {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        const reader = new FileReader();
+
+        reader.onload = (e) => {
+          img.src = e.target.result;
+        };
+
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.width;
+          canvas.height = img.height;
+
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0);
+
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) {
+                reject("Failed to convert image");
+                return;
+              }
+
+              const newFile = new File(
+                [blob],
+                `${modelName}.jpg`,
+                { type: "image/jpeg" }
+              );
+
+              resolve(newFile);
+            },
+            "image/jpeg",
+            0.9
+          );
+        };
+
+        reader.readAsDataURL(file);
+      });
+    };
+
   const handleCreateModel = async (e) => {
     e.preventDefault();
 
@@ -104,6 +146,15 @@ export default function Models() {
 
     try {
       setSubmitting(true);
+      // Upload thumbnail if provided
+      if (thumbnail) {
+        const convertedImage = await convertImageToJPG(thumbnail, name);
+
+        const thumbnailPath = `thumbnails/${name}.jpg`;
+        const thumbnailRef = ref(storage, thumbnailPath);
+
+        await uploadFile(thumbnailRef, convertedImage);
+}
 
 
       await addDoc(collection(db, "models"), {
@@ -199,6 +250,34 @@ export default function Models() {
                   <span className="font-medium">
                     {getNameFromFile(file)}
                   </span>
+                </p>
+              )}
+            </div>
+              
+              {/* image upload */}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Thumbnail Image
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+
+                  if (file && !file.type.startsWith("image/")) {
+                    alert("Please upload a valid image.");
+                    return;
+                  }
+
+                  setThumbnail(file);
+                }}
+                className="w-full border border-border rounded px-3 py-2"
+              />
+
+              {thumbnail && (
+                <p className="text-sm mt-2">
+                  Thumbnail: {thumbnail.name}
                 </p>
               )}
             </div>
