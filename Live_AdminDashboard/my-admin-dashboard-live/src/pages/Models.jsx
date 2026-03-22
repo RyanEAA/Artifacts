@@ -21,11 +21,15 @@ export default function Models() {
   const { user, loading } = useAuth();
   const { data: models = [] } = useFirestore("models");
 
+  const [selectedId, setSelectedId] = useState(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+
+  const [category, setCategory] = useState("");
+  const [scaleCompensation, setScaleCompensation] = useState("");
   const [file, setFile] = useState(null);
   const [progress, setProgress] = useState(0);
-  const [selectedId, setSelectedId] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  // 🚨 Block until auth is ready
   if (loading) {
     return (
       <AdminLayout>
@@ -34,7 +38,6 @@ export default function Models() {
     );
   }
 
-  // 🚨 Block if not logged in
   if (!user) {
     return (
       <AdminLayout>
@@ -43,7 +46,23 @@ export default function Models() {
     );
   }
 
-  // Upload helper
+  // 🔑 Extract name from filename
+  const getNameFromFile = (file) => {
+    if (!file) return "";
+    return file.name.replace(/\.usdz$/i, "");
+  };
+
+  const resetForm = () => {
+    setCategory("");
+    setScaleCompensation("");
+    setFile(null);
+    setProgress(0);
+    setSubmitting(false);
+
+    const input = document.getElementById("modelFileInput");
+    if (input) input.value = "";
+  };
+
   const uploadFile = (fileRef, fileData) =>
     new Promise((resolve, reject) => {
       const task = uploadBytesResumable(fileRef, fileData);
@@ -63,44 +82,43 @@ export default function Models() {
       );
     });
 
-  const handleUpload = async () => {
-    if (!user) {
-      alert("You must be logged in.");
-      return;
-    }
+  const handleCreateModel = async (e) => {
+    e.preventDefault();
 
     if (!file) {
-      alert("Upload a USDZ file.");
+      alert("Please select a USDZ file.");
       return;
     }
 
     if (!file.name.toLowerCase().endsWith(".usdz")) {
-      alert("Only .usdz files allowed.");
+      alert("Only .usdz files are allowed.");
       return;
     }
 
-    try {
-      const timestamp = Date.now();
-      const modelPath = `models/${timestamp}_${file.name}`;
-      const modelRef = ref(storage, modelPath);
+    if (!category.trim() || !scaleCompensation.trim()) {
+      alert("Please fill out category and scale compensation.");
+      return;
+    }
 
-      const modelUrl = await uploadFile(modelRef, file);
+    const name = getNameFromFile(file);
+
+    try {
+      setSubmitting(true);
+
 
       await addDoc(collection(db, "models"), {
-        name: file.name,
-        url: modelUrl,
-        modelPath,
-        ownerUid: user.uid,
-        createdAt: serverTimestamp(),
+        name: name.replace(".usdz", ""),
+        category: category.trim(),
+        scaleCompensation: scaleCompensation.trim(),
       });
 
-      setFile(null);
-      setProgress(0);
-
-      alert("Uploaded!");
+      alert("Model created successfully.");
+      resetForm();
+      setShowCreateForm(false);
     } catch (err) {
       console.error(err);
-      alert("Upload failed");
+      alert("Model creation failed.");
+      setSubmitting(false);
     }
   };
 
@@ -126,82 +144,116 @@ export default function Models() {
 
   return (
     <AdminLayout>
-      <h1 className="text-2xl font-bold mb-6 text-textPrimary">
-        3D Models
-      </h1>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold text-textPrimary">3D Models</h1>
 
-      {/* Upload Section */}
-      <section className="bg-surface p-6 rounded-lg mb-6">
-        <div className="flex flex-col gap-3">
-
-          {/* Drag + Click Upload */}
-          <div
-            onClick={() =>
-              document.getElementById("fileInput").click()
+        <button
+          onClick={() => {
+            if (showCreateForm) {
+              resetForm();
+              setShowCreateForm(false);
+            } else {
+              setShowCreateForm(true);
             }
-            onDrop={(e) => {
-              e.preventDefault();
-              const droppedFile = e.dataTransfer.files[0];
+          }}
+          className="bg-blue-500 text-white px-4 py-2 rounded"
+        >
+          {showCreateForm ? "Cancel" : "Create New Model"}
+        </button>
+      </div>
 
-              if (
-                droppedFile?.name
-                  .toLowerCase()
-                  .endsWith(".usdz")
-              ) {
-                setFile(droppedFile);
-              } else {
-                alert("Only .usdz files allowed.");
-              }
-            }}
-            onDragOver={(e) => e.preventDefault()}
-            className="border-2 border-dashed p-8 text-center cursor-pointer rounded-lg"
-          >
-            <p className="font-medium">
-              Drag & drop USDZ here
-            </p>
-            <p className="text-sm text-gray-500">
-              or click to select file
-            </p>
+      {/* Create Form */}
+      {showCreateForm && (
+        <section className="bg-surface p-6 rounded-lg mb-6 border border-border">
+          <form onSubmit={handleCreateModel} className="flex flex-col gap-4">
 
-            <input
-              id="fileInput"
-              type="file"
-              accept=".usdz"
-              className="hidden"
-              onChange={(e) =>
-                setFile(e.target.files[0])
-              }
-            />
-          </div>
+            {/* File Upload */}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                USDZ File
+              </label>
+              <input
+                id="modelFileInput"
+                type="file"
+                accept=".usdz"
+                onChange={(e) => {
+                  const selectedFile = e.target.files?.[0] || null;
 
-          {/* Selected file */}
-          {file && (
-            <p className="text-sm">
-              📦 {file.name}
-            </p>
-          )}
+                  if (
+                    selectedFile &&
+                    !selectedFile.name.toLowerCase().endsWith(".usdz")
+                  ) {
+                    alert("Only .usdz files are allowed.");
+                    return;
+                  }
 
-          {/* Upload button */}
-          <button
-            onClick={handleUpload}
-            className="bg-blue-500 text-white px-4 py-2 rounded"
-          >
-            Upload
-          </button>
+                  setFile(selectedFile);
+                }}
+                className="w-full border border-border rounded px-3 py-2"
+              />
 
-          {/* Progress bar */}
-          {progress > 0 && (
-            <div className="w-full bg-gray-200 rounded">
-              <div
-                className="bg-blue-500 text-xs text-white p-1 rounded"
-                style={{ width: `${progress}%` }}
-              >
-                {progress}%
-              </div>
+              {file && (
+                <p className="text-sm mt-2">
+                  Model name:{" "}
+                  <span className="font-medium">
+                    {getNameFromFile(file)}
+                  </span>
+                </p>
+              )}
             </div>
-          )}
-        </div>
-      </section>
+
+            {/* Category */}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Category
+              </label>
+              <input
+                type="text"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                placeholder="adf"
+                className="w-full border border-border rounded px-3 py-2"
+              />
+            </div>
+
+            {/* Scale */}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Scale Compensation
+              </label>
+              <input
+                type="text"
+                value={scaleCompensation}
+                onChange={(e) => setScaleCompensation(e.target.value)}
+                placeholder="0.5"
+                className="w-full border border-border rounded px-3 py-2"
+              />
+            </div>
+
+            {/* Progress */}
+            {progress > 0 && (
+              <div className="w-full bg-gray-200 rounded">
+                <div
+                  className="bg-blue-500 text-xs text-white p-1 rounded"
+                  style={{ width: `${progress}%` }}
+                >
+                  {progress}%
+                </div>
+              </div>
+            )}
+
+            {/* Submit */}
+            <button
+              type="submit"
+              disabled={submitting}
+              className="bg-blue-500 text-white px-4 py-2 rounded disabled:opacity-50"
+            >
+              {submitting ? "Creating..." : "Create Model"}
+            </button>
+          </form>
+        </section>
+      )}
 
       {/* Models Grid */}
       <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -216,11 +268,15 @@ export default function Models() {
             }`}
           >
             <div className="p-3">
-              <p className="text-sm font-medium truncate">
-                {m.name}
+              <p className="text-sm font-medium truncate">{m.name}</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Category: {m.category || "—"}
+              </p>
+              <p className="text-xs text-gray-500">
+                Scale: {m.scaleCompensation || "—"}
               </p>
 
-              <div className="flex justify-between mt-2">
+              <div className="flex justify-between mt-3">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -238,4 +294,3 @@ export default function Models() {
     </AdminLayout>
   );
 }
-
