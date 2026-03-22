@@ -57,6 +57,7 @@ export default function Models() {
     setCategory("");
     setScaleCompensation("");
     setFile(null);
+    setThumbnail(null);
     setProgress(0);
     setSubmitting(false);
 
@@ -146,11 +147,16 @@ export default function Models() {
 
     try {
       setSubmitting(true);
+      const modelPath = `models/${name}.usdz`;
+      const modelRef = ref(storage, modelPath);
+      const modelUrl = await uploadFile(modelRef, file);
+
+      let thumbnailPath = null;
       // Upload thumbnail if provided
       if (thumbnail) {
         const convertedImage = await convertImageToJPG(thumbnail, name);
 
-        const thumbnailPath = `thumbnails/${name}.jpg`;
+        thumbnailPath = `thumbnails/${name}.jpg`;
         const thumbnailRef = ref(storage, thumbnailPath);
 
         await uploadFile(thumbnailRef, convertedImage);
@@ -158,9 +164,14 @@ export default function Models() {
 
 
       await addDoc(collection(db, "models"), {
-        name: name.replace(".usdz", ""),
+        name,
         category: category.trim(),
         scaleCompensation: scaleCompensation.trim(),
+        url: modelUrl,
+        modelPath,
+        thumbnailPath,
+        ownerUid: user?.uid || null,
+        createdAt: serverTimestamp(),
       });
 
       alert("Model created successfully.");
@@ -182,11 +193,36 @@ export default function Models() {
     if (!window.confirm("Delete this model?")) return;
 
     try {
-      await deleteDoc(doc(db, "models", model.id));
+      const normalizedName = String(model.name || "").replace(/\.usdz$/i, "");
 
-      if (model.modelPath) {
-        await deleteObject(ref(storage, model.modelPath));
-      }
+      const candidateModelPaths = [
+        model.modelPath,
+        normalizedName ? `models/${normalizedName}.usdz` : null,
+      ].filter(Boolean);
+
+      const candidateThumbnailPaths = [
+        model.thumbnailPath,
+        normalizedName ? `thumbnails/${normalizedName}.jpg` : null,
+      ].filter(Boolean);
+
+      const deleteStoragePath = async (path) => {
+        try {
+          await deleteObject(ref(storage, path));
+        } catch (error) {
+          // Ignore missing files so cleanup can continue.
+          if (error?.code !== "storage/object-not-found") {
+            throw error;
+          }
+        }
+      };
+
+      // Delete the uploaded files first, then remove the DB record.
+      await Promise.all([
+        ...candidateModelPaths.map(deleteStoragePath),
+        ...candidateThumbnailPaths.map(deleteStoragePath),
+      ]);
+
+      await deleteDoc(doc(db, "models", model.id));
     } catch (err) {
       console.error(err);
       alert("Delete failed");
