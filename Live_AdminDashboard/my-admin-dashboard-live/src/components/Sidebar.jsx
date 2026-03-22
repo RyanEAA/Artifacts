@@ -19,6 +19,9 @@ export default function Sidebar() {
         <Link to="/dashboard/artifacts" className="block px-3 py-2 rounded hover:bg-white/20">
           Artifacts
         </Link>
+        <Link to="/dashboard/models" className="block px-3 py-2 rounded hover:bg-white/20">
+          Models
+        </Link>
       </nav>
     </aside>
   );

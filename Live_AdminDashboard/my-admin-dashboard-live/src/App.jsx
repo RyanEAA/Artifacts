@@ -5,6 +5,7 @@ import Users from "./pages/Users";
 import Artifacts from "./pages/Artifacts";
 import Unauthorized from "./pages/Unauthorized";
 import ProtectedRoute from "./routes/ProtectedRoute";
+import Models from "./pages/Models";
 
 export default function App() {
   return (
@@ -39,6 +40,14 @@ export default function App() {
         element={
           <ProtectedRoute adminOnly>
             <Artifacts />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dashboard/models"
+        element={
+          <ProtectedRoute adminOnly>
+            <Models />
           </ProtectedRoute>
         }
       />
