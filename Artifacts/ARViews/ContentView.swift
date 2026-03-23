@@ -25,7 +25,7 @@ struct ContentView: View {
             ZStack {
                 ARViewContainer()
 
-                TrackingStateView(trackingState: arSessionState.trackingState)
+                //TrackingStateView(trackingState: arSessionState.trackingState)
                 
             }
                
