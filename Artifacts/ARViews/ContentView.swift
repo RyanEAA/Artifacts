@@ -26,6 +26,7 @@ struct ContentView: View {
                 ARViewContainer()
 
                 TrackingStateView(trackingState: arSessionState.trackingState)
+                
             }
                
             

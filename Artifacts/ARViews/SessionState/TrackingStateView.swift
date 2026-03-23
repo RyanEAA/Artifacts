@@ -36,7 +36,7 @@ struct TrackingStateView: View {
             .padding(.horizontal)
             .padding(.top, 60)
             .transition(.move(edge: .top).combined(with: .opacity))
-            .animation(.easeInOut(duration: 0.25), value: stateKey)
+            .animation(.spring(response: 0.4, dampingFraction: 0.85, blendDuration: 0.2), value: stateKey)
         }
     }
 }
