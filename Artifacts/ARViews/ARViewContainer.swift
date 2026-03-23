@@ -35,6 +35,9 @@ struct ARViewContainer: UIViewRepresentable {
     @EnvironmentObject var modelsViewModel: ModelsViewModel
     @EnvironmentObject var modelDeletionManager: ModelDeletionManager
     @EnvironmentObject var collaborationManager: CollaborationManager
+    @EnvironmentObject var arSessionState: ARSessionState
+
+
 
     func makeUIView(context: Context) -> CustomARView {
         let arView = CustomARView(

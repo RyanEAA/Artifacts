@@ -16,8 +16,8 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "122"
             endingLineNumber = "122"
-            landmarkName = "CloudSceneStore"
-            landmarkType = "21">
+            landmarkName = "ensureSceneDocumentExists(sceneId:name:completion:)"
+            landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
       <BreakpointProxy
@@ -32,7 +32,7 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "142"
             endingLineNumber = "142"
-            landmarkName = "loadMostRecentSceneData(completion:)"
+            landmarkName = "load(sceneId:completion:)"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
@@ -48,8 +48,8 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "75"
             endingLineNumber = "75"
-            landmarkName = "CloudSceneStore"
-            landmarkType = "3">
+            landmarkName = "resolveWritableSceneId(preferredSceneId:completion:)"
+            landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
       <BreakpointProxy
@@ -80,7 +80,7 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "111"
             endingLineNumber = "111"
-            landmarkName = "fetchMostRecentSceneMeta(completion:)"
+            landmarkName = "resolveWritableSceneId(preferredSceneId:completion:)"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
@@ -96,7 +96,7 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "112"
             endingLineNumber = "112"
-            landmarkName = "fetchMostRecentSceneMeta(completion:)"
+            landmarkName = "resolveWritableSceneId(preferredSceneId:completion:)"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>

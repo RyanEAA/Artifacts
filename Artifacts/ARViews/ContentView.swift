@@ -11,6 +11,8 @@ struct ContentView: View {
     @EnvironmentObject var modelsViewModel: ModelsViewModel
     @EnvironmentObject var modelDeletionManager: ModelDeletionManager
     @EnvironmentObject var sceneManager: SceneManager
+    @EnvironmentObject var arSessionState: ARSessionState
+
 
     @State private var selectedControlMode: Int = 0
     @State private var isControlsVisible: Bool = true
@@ -20,7 +22,11 @@ struct ContentView: View {
     var body: some View {
 
         ZStack(alignment: .bottom){
-            ARViewContainer()
+            ZStack {
+                ARViewContainer()
+
+                TrackingStateView(trackingState: arSessionState.trackingState)
+            }
                
             
             switch placementSettings.selectedTool {

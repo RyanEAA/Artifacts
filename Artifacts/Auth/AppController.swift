@@ -23,6 +23,7 @@ struct AppController: App {
     @StateObject var modelDeletionManager = ModelDeletionManager()
     @StateObject var friendsService = FriendsService()
     @StateObject var collaborationManager = CollaborationManager()
+    @StateObject var arSessionState = ARSessionState()
 
 
     var body: some Scene {
@@ -41,6 +42,7 @@ struct AppController: App {
                     .environmentObject(modelDeletionManager)
                     .environmentObject(friendsService)
                     .environmentObject(collaborationManager)
+                    .environmentObject(arSessionState)
             } else {
                 AuthView()
                     .environmentObject(session)

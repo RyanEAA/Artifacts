@@ -50,9 +50,11 @@ extension ARViewContainer {
         }
 
         // MARK: - ARSessionDelegate: Anchors Added
-
+        
         func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
             guard let arView = arView else { return }
+            
+            
 
             for anchor in anchors {
                 // Annotation anchors
@@ -199,10 +201,18 @@ extension ARViewContainer {
         // MARK: - ARSessionDelegate: Frame Update (drives smooth drawing)
 
         func session(_ session: ARSession, didUpdate frame: ARFrame) {
+            DispatchQueue.main.async {
+                // ✅ tracking state
+                self.parent.arSessionState.trackingState = frame.camera.trackingState
+            }
+
+            // ✅ drawing logic (keep existing behavior)
             guard case .draw = parent.placementSettings.selectedTool else { return }
             guard currentFingerPosition != nil else { return }
             guard !isDrawingTickScheduled else { return }
+
             isDrawingTickScheduled = true
+
             DispatchQueue.main.async {
                 self.tickDrawing()
                 self.isDrawingTickScheduled = false
