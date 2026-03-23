@@ -322,7 +322,7 @@ sequenceDiagram
   UI->>ModelsViewModel: fetchData()
   ModelsViewModel->>Firestore: read models
   Firestore-->>ModelsViewModel: metadata
-  ModelsViewModel->>Storage: download usdz/jpg
+  ModelsViewModel->>Storage: selectModel() download usdz/jpg
   Storage-->>UI: local file URLs
 ```
 
